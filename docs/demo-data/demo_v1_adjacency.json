@@ -1,0 +1,23 @@
+[
+  { "parcel_id": "p1", "neighbor_parcel_id": "p2" },
+  { "parcel_id": "p1", "neighbor_parcel_id": "p4" },
+  { "parcel_id": "p2", "neighbor_parcel_id": "p1" },
+  { "parcel_id": "p2", "neighbor_parcel_id": "p3" },
+  { "parcel_id": "p2", "neighbor_parcel_id": "p5" },
+  { "parcel_id": "p3", "neighbor_parcel_id": "p2" },
+  { "parcel_id": "p3", "neighbor_parcel_id": "p6" },
+  { "parcel_id": "p4", "neighbor_parcel_id": "p1" },
+  { "parcel_id": "p4", "neighbor_parcel_id": "p5" },
+  { "parcel_id": "p4", "neighbor_parcel_id": "p7" },
+  { "parcel_id": "p5", "neighbor_parcel_id": "p2" },
+  { "parcel_id": "p5", "neighbor_parcel_id": "p4" },
+  { "parcel_id": "p5", "neighbor_parcel_id": "p6" },
+  { "parcel_id": "p5", "neighbor_parcel_id": "p8" },
+  { "parcel_id": "p6", "neighbor_parcel_id": "p3" },
+  { "parcel_id": "p6", "neighbor_parcel_id": "p5" },
+  { "parcel_id": "p7", "neighbor_parcel_id": "p4" },
+  { "parcel_id": "p7", "neighbor_parcel_id": "p8" },
+  { "parcel_id": "p8", "neighbor_parcel_id": "p5" },
+  { "parcel_id": "p8", "neighbor_parcel_id": "p7" }
+]
+

@@ -1,0 +1,30 @@
+from typing import Any
+
+from pydantic import BaseModel, Field
+
+
+class ErrorDetail(BaseModel):
+    code: str
+    message: str
+    details: dict[str, Any] | None = None
+
+
+class ErrorResponse(BaseModel):
+    ok: bool = False
+    error: ErrorDetail
+
+
+class CenterPoint(BaseModel):
+    lat: float
+    lng: float
+
+
+class ReasonItem(BaseModel):
+    code: str
+    text: str
+
+
+class RecommendationItem(BaseModel):
+    type: str
+    text: str
+
