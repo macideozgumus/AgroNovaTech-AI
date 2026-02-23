@@ -109,3 +109,67 @@ class DecisionEngineAdapter:
             model_version=payload.get("model_version", "rules_v1"),
         )
 
+
+def run_rules_v1(
+    parcel_crop_id: str,
+    neighbor_crop_ids: list[str],
+    village_unique_crops_count: int,
+) -> EngineOutput:
+    score = 0
+    reason_codes = []
+    recommendations = []
+
+    # Eğer parsel boşsa direkt dön
+    if not parcel_crop_id:
+        return EngineOutput(
+            risk_score=0,
+            risk_level=RiskLevel.UNKNOWN.value,
+            reason_codes=["UNKNOWN_DATA"],
+            recommendations=[],
+            confidence=0.0,
+            model_version="rules_v1",
+        )
+
+    # Kural-1: Komşu uyumsuzluk (c_wheat ile c_sunflower yan yanaysa)
+    for neighbor in neighbor_crop_ids:
+        if (parcel_crop_id == "c_wheat" and neighbor == "c_sunflower") or \
+           (parcel_crop_id == "c_sunflower" and neighbor == "c_wheat"):
+            score += 20
+            if "NEIGHBOR_INCOMPATIBLE" not in reason_codes:
+                reason_codes.append("NEIGHBOR_INCOMPATIBLE")
+                recommendations.append({
+                    "type": "CROP_SUGGESTION", 
+                    "text": "Buğday ve Ayçiçek yan yana ekimi risklidir. Arpa önerilir."
+                })
+
+    # Kural-2: Aynı ürün yoğunluğu > %50 ise
+    if neighbor_crop_ids:
+        same_crop_count = neighbor_crop_ids.count(parcel_crop_id)
+        if (same_crop_count / len(neighbor_crop_ids)) > 0.5:
+            score += 15
+            if "SAME_CROP_CLUSTERING" not in reason_codes:
+                reason_codes.append("SAME_CROP_CLUSTERING")
+                recommendations.append({
+                    "type": "ACTION", 
+                    "text": "Aynı ürün yoğunluğu yüksek. Ekim nöbeti (rotasyon) uygulayın."
+                })
+
+    # Kural-3: Köydeki farklı ürün sayısı > 3 ise
+    if village_unique_crops_count > 3:
+        score += 10
+        reason_codes.append("HIGH_DIVERSITY_PRESSURE")
+
+    # Skoru 0-100 arasına kilitle
+    score = int(clamp(score, 0, 100))
+    
+    # Seviyeyi belirle
+    risk_level = risk_level_from_score(score)
+
+    return EngineOutput(
+        risk_score=score,
+        risk_level=risk_level.value if hasattr(risk_level, 'value') else risk_level,
+        reason_codes=reason_codes,
+        recommendations=recommendations,
+        confidence=0.0,
+        model_version="rules_v1",
+    )
