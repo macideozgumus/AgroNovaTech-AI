@@ -1,4 +1,30 @@
-function FarmMap() {
+type Parcel = {
+  parcel_id: string;
+  name: string;
+  status: "UNKNOWN" | "OK" | "RISKY" | "CRITICAL";
+  risk_level?: "UNKNOWN" | "OK" | "RISKY" | "CRITICAL" | null;
+};
+
+type Props = {
+  parcels: Parcel[];
+  selectedParcelId: string | null;
+  onSelect: (parcelId: string) => void;
+};
+
+const riskColor = (level?: string | null) => {
+  switch (level) {
+    case "OK":
+      return "#2ecc71";
+    case "RISKY":
+      return "#f1c40f";
+    case "CRITICAL":
+      return "#e74c3c";
+    default:
+      return "#95a5a6";
+  }
+};
+
+function FarmMap({ parcels, selectedParcelId, onSelect }: Props) {
   return (
     <div
       style={{
@@ -25,48 +51,43 @@ function FarmMap() {
           padding: "12px",
         }}
       >
-        {["P1", "P2", "P3", "P4", "P5", "P6", "P7", "P8"].map((parcel) => {
-          const color =
-            parcel === "P1"
-              ? "#f1c40f"
-              : parcel === "P5"
-              ? "#e74c3c"
-              : "#2ecc71";
-
-          return (
-            <button
-              key={parcel}
-              type="button"
+        {parcels.map((parcel) => (
+          <button
+            key={parcel.parcel_id}
+            type="button"
+            onClick={() => onSelect(parcel.parcel_id)}
+            style={{
+              border:
+                selectedParcelId === parcel.parcel_id
+                  ? "2px solid #2980b9"
+                  : "1px solid #d8dde3",
+              borderRadius: "10px",
+              background: "#fff",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              padding: "10px 12px",
+              color: "#2c3e50",
+              fontWeight: 600,
+              cursor: "pointer",
+            }}
+          >
+            <span>{parcel.name}</span>
+            <span
               style={{
-                border: "1px solid #d8dde3",
-                borderRadius: "10px",
-                background: "#fff",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                padding: "10px 12px",
-                color: "#2c3e50",
-                fontWeight: 600,
+                width: "12px",
+                height: "12px",
+                borderRadius: "999px",
+                backgroundColor: riskColor(parcel.risk_level ?? parcel.status),
+                display: "inline-block",
               }}
-            >
-              <span>{parcel}</span>
-              <span
-                style={{
-                  width: "12px",
-                  height: "12px",
-                  borderRadius: "999px",
-                  backgroundColor: color,
-                  display: "inline-block",
-                }}
-              />
-            </button>
-          );
-        })}
-        <div />
+            />
+          </button>
+        ))}
+        {parcels.length < 9 ? <div /> : null}
       </div>
     </div>
   );
 }
 
 export default FarmMap;
-

@@ -1,10 +1,311 @@
-from fastapi import FastAPI
-from app.routes.health import router as health_router
+from copy import deepcopy
+from datetime import datetime, timezone
+from typing import Any, Dict, List
 
-app = FastAPI(title="AgroNovaTech-AI Backend")
+from fastapi import FastAPI, HTTPException, Query
+from fastapi.middleware.cors import CORSMiddleware
+
+
+app = FastAPI(title="AgroNovaTech-AI Backend", version="v1-demo")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173", "*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+SEASON = "2026_Spring"
+VILLAGE = {
+    "village_id": "v1",
+    "name": "Demo Koyu",
+    "center": {"lat": 39.0, "lng": 35.0},
+}
+CROPS = [
+    {"crop_id": "c_wheat", "crop_name": "Bugday"},
+    {"crop_id": "c_barley", "crop_name": "Arpa"},
+    {"crop_id": "c_sunflower", "crop_name": "Aycicek"},
+    {"crop_id": "c_corn", "crop_name": "Misir"},
+]
+CROP_NAME_MAP = {item["crop_id"]: item["crop_name"] for item in CROPS}
+PARCELS = [
+    {"parcel_id": "p1", "name": "P1"},
+    {"parcel_id": "p2", "name": "P2"},
+    {"parcel_id": "p3", "name": "P3"},
+    {"parcel_id": "p4", "name": "P4"},
+    {"parcel_id": "p5", "name": "P5"},
+    {"parcel_id": "p6", "name": "P6"},
+    {"parcel_id": "p7", "name": "P7"},
+    {"parcel_id": "p8", "name": "P8"},
+]
+ADJACENCY: Dict[str, List[str]] = {
+    "p1": ["p2", "p4"],
+    "p2": ["p1", "p3", "p5"],
+    "p3": ["p2", "p6"],
+    "p4": ["p1", "p5", "p7"],
+    "p5": ["p2", "p4", "p6", "p8"],
+    "p6": ["p3", "p5"],
+    "p7": ["p4", "p8"],
+    "p8": ["p5", "p7"],
+}
+HIGH_INCOMPATIBLE = {("c_wheat", "c_sunflower"), ("c_sunflower", "c_wheat")}
+MEDIUM_INCOMPATIBLE = {("c_corn", "c_sunflower"), ("c_sunflower", "c_corn")}
+
+STATE: Dict[str, Any] = {
+    "crop_plan": {
+        "p1": "c_wheat",
+        "p2": "c_sunflower",
+        "p3": "c_wheat",
+        "p4": "c_wheat",
+        "p5": "c_sunflower",
+        "p6": "c_corn",
+        "p7": "c_barley",
+        "p8": "c_wheat",
+    },
+    "decisions": {},
+    "last_job_id": None,
+}
+
+
+def now_iso() -> str:
+    return datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
+
+
+def risk_level_from_score(score: int) -> str:
+    if score >= 70:
+        return "CRITICAL"
+    if score >= 40:
+        return "RISKY"
+    return "OK"
+
+
+def build_reasons(reason_codes: List[str], parcel_id: str) -> List[Dict[str, str]]:
+    texts = {
+        "NEIGHBOR_INCOMPATIBLE": "Komsu parsellerde uyumsuz urun kombinasyonu tespit edildi.",
+        "HIGH_DIVERSITY_PRESSURE": "Koyde urun dagilimi dengesiz.",
+        "SAME_CROP_CLUSTERING": "Ayni urun yogunlugu yuksek.",
+        "UNKNOWN_DATA": "Karar icin bazi veriler eksik veya tanimsiz.",
+    }
+    result: List[Dict[str, str]] = []
+    for code in reason_codes:
+        text = texts.get(code, texts["UNKNOWN_DATA"])
+        if code == "NEIGHBOR_INCOMPATIBLE" and parcel_id == "p1":
+            text = "Komsu parselde aycicek tespit edildi."
+        result.append({"code": code, "text": text})
+    return result
+
+
+def build_recommendations(parcel_id: str, crop_id: str, reason_codes: List[str]) -> List[Dict[str, str]]:
+    recs: List[Dict[str, str]] = []
+    if "NEIGHBOR_INCOMPATIBLE" in reason_codes:
+        recs.append({"type": "CROP_SUGGESTION", "text": "Arpa veya misir onerilir."})
+    elif "SAME_CROP_CLUSTERING" in reason_codes:
+        recs.append({"type": "CROP_SUGGESTION", "text": "Munavebe icin farkli urun planlayin."})
+    else:
+        recs.append({"type": "ACTION", "text": "Mevcut plan uygun gorunuyor, sezon takibi yapin."})
+
+    if parcel_id == "p1":
+        recs.append({"type": "ACTION", "text": "Ekim tarihini 7-10 gun kaydirmak risk azaltabilir."})
+    return recs
+
+
+def compute_all_decisions() -> Dict[str, Dict[str, Any]]:
+    crop_plan = STATE["crop_plan"]
+    crop_counts: Dict[str, int] = {}
+    for crop_id in crop_plan.values():
+        crop_counts[crop_id] = crop_counts.get(crop_id, 0) + 1
+
+    unique_crops = len(set(crop_plan.values()))
+    decisions: Dict[str, Dict[str, Any]] = {}
+
+    for parcel in PARCELS:
+        parcel_id = parcel["parcel_id"]
+        crop_id = crop_plan.get(parcel_id)
+        if not crop_id:
+            decisions[parcel_id] = {
+                "parcel_id": parcel_id,
+                "season": SEASON,
+                "risk_score": 0,
+                "risk_level": "UNKNOWN",
+                "reasons": [{"code": "UNKNOWN_DATA", "text": "Karar icin bazi veriler eksik veya tanimsiz."}],
+                "recommendations": [{"type": "WARNING", "text": "Once urun plani giriniz."}],
+                "confidence": None,
+                "model_version": "rules_v1",
+            }
+            continue
+
+        score = 0
+        reason_codes: List[str] = []
+        same_neighbors = 0
+
+        for neighbor_id in ADJACENCY.get(parcel_id, []):
+            neighbor_crop = crop_plan.get(neighbor_id)
+            pair = (crop_id, neighbor_crop)
+            if pair in HIGH_INCOMPATIBLE:
+                score += 45
+                if "NEIGHBOR_INCOMPATIBLE" not in reason_codes:
+                    reason_codes.append("NEIGHBOR_INCOMPATIBLE")
+            elif pair in MEDIUM_INCOMPATIBLE:
+                score += 22
+                if "NEIGHBOR_INCOMPATIBLE" not in reason_codes:
+                    reason_codes.append("NEIGHBOR_INCOMPATIBLE")
+            elif neighbor_crop == crop_id:
+                score += 13
+                same_neighbors += 1
+                if "SAME_CROP_CLUSTERING" not in reason_codes:
+                    reason_codes.append("SAME_CROP_CLUSTERING")
+
+        if crop_counts.get(crop_id, 0) / len(PARCELS) >= 0.5:
+            if "SAME_CROP_CLUSTERING" not in reason_codes:
+                reason_codes.append("SAME_CROP_CLUSTERING")
+            score += 15
+
+        if unique_crops > 3:
+            if "HIGH_DIVERSITY_PRESSURE" not in reason_codes:
+                reason_codes.append("HIGH_DIVERSITY_PRESSURE")
+            score += 10
+
+        if same_neighbors >= 2:
+            score += 8
+
+        score = max(0, min(100, score))
+        decisions[parcel_id] = {
+            "parcel_id": parcel_id,
+            "season": SEASON,
+            "risk_score": score,
+            "risk_level": risk_level_from_score(score),
+            "reasons": build_reasons(reason_codes, parcel_id),
+            "recommendations": build_recommendations(parcel_id, crop_id, reason_codes),
+            "confidence": 0.72,
+            "model_version": "rules_v1",
+        }
+
+    return decisions
+
+
+def ensure_decisions() -> None:
+    if not STATE["decisions"]:
+        STATE["decisions"] = compute_all_decisions()
+
 
 @app.get("/")
 def root():
     return {"message": "AgroNovaTech-AI backend is running"}
 
-app.include_router(health_router)
+
+@app.get("/api/v1/health")
+def health_check():
+    return {"status": "ok", "service": "backend", "version": "v1"}
+
+
+@app.post("/api/v1/auth/login")
+def login(_: Dict[str, Any]):
+    return {
+        "ok": True,
+        "access_token": "demo-jwt-token",
+        "token_type": "bearer",
+        "role": "FARMER",
+    }
+
+
+@app.get("/api/v1/villages")
+def villages():
+    return {"villages": [VILLAGE]}
+
+
+@app.get("/api/v1/crops")
+def crops():
+    return {"crops": CROPS}
+
+
+@app.get("/api/v1/villages/{village_id}/parcels")
+def village_parcels(village_id: str, season: str = Query(...)):
+    if village_id != VILLAGE["village_id"]:
+        raise HTTPException(status_code=404, detail="Village not found")
+    if season != SEASON:
+        raise HTTPException(status_code=400, detail="Unsupported season")
+    ensure_decisions()
+
+    items = []
+    for parcel in PARCELS:
+        pid = parcel["parcel_id"]
+        crop_id = STATE["crop_plan"].get(pid)
+        decision = STATE["decisions"].get(pid)
+        items.append(
+            {
+                "parcel_id": pid,
+                "name": parcel["name"],
+                "status": decision["risk_level"] if decision else "UNKNOWN",
+                "crop": {"crop_id": crop_id, "crop_name": CROP_NAME_MAP.get(crop_id, "")} if crop_id else None,
+                "risk_score": decision["risk_score"] if decision else None,
+                "risk_level": decision["risk_level"] if decision else None,
+            }
+        )
+    return {"village_id": village_id, "season": season, "parcels": items}
+
+
+@app.put("/api/v1/parcels/{parcel_id}/crop-plan")
+def update_crop(parcel_id: str, payload: Dict[str, Any]):
+    if parcel_id not in ADJACENCY:
+        raise HTTPException(status_code=404, detail="Parcel not found")
+    if payload.get("season") != SEASON:
+        raise HTTPException(status_code=400, detail="Unsupported season")
+    crop_id = payload.get("crop_id")
+    if crop_id not in CROP_NAME_MAP:
+        raise HTTPException(status_code=400, detail="Invalid crop_id")
+    STATE["crop_plan"][parcel_id] = crop_id
+    STATE["decisions"] = {}
+    return {"ok": True, "parcel_id": parcel_id, "season": SEASON}
+
+
+@app.post("/api/v1/decision/score")
+def score(payload: Dict[str, Any]):
+    if payload.get("village_id") != VILLAGE["village_id"]:
+        raise HTTPException(status_code=404, detail="Village not found")
+    if payload.get("season") != SEASON:
+        raise HTTPException(status_code=400, detail="Unsupported season")
+    STATE["decisions"] = compute_all_decisions()
+    STATE["last_job_id"] = "djob_{}".format(int(datetime.now().timestamp()))
+    return {
+        "ok": True,
+        "job_id": STATE["last_job_id"],
+        "status": "COMPLETED",
+        "computed_at": now_iso(),
+    }
+
+
+@app.get("/api/v1/parcels/{parcel_id}/decision")
+def parcel_decision(parcel_id: str, season: str = Query(...)):
+    if parcel_id not in ADJACENCY:
+        raise HTTPException(status_code=404, detail="Parcel not found")
+    if season != SEASON:
+        raise HTTPException(status_code=400, detail="Unsupported season")
+    ensure_decisions()
+    if parcel_id not in STATE["decisions"]:
+        raise HTTPException(status_code=404, detail="Decision not found")
+    return deepcopy(STATE["decisions"][parcel_id])
+
+
+@app.get("/api/v1/villages/{village_id}/decision-summary")
+def village_summary(village_id: str, season: str = Query(...)):
+    if village_id != VILLAGE["village_id"]:
+        raise HTTPException(status_code=404, detail="Village not found")
+    if season != SEASON:
+        raise HTTPException(status_code=400, detail="Unsupported season")
+    ensure_decisions()
+    dist = {"OK": 0, "RISKY": 0, "CRITICAL": 0, "UNKNOWN": 0}
+    for item in STATE["decisions"].values():
+        dist[item["risk_level"]] = dist.get(item["risk_level"], 0) + 1
+    return {
+        "village_id": village_id,
+        "season": season,
+        "risk_distribution": dist,
+        "shared_recommendations": [
+            {
+                "type": "VILLAGE_PLAN",
+                "text": "Aycicek ve bugday komsulugunu azaltarak koy geneli risk dusurulebilir.",
+            }
+        ],
+        "model_version": "rules_v1",
+    }

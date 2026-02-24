@@ -1,0 +1,7 @@
+Alembic migration files for AgroNovaTech-AI backend.
+
+Typical usage (PowerShell):
+
+  $env:DATABASE_URL="postgresql+psycopg2://postgres:postgres@localhost:5432/agronovatech_ai"
+  alembic upgrade head
+
