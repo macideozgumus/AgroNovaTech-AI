@@ -1,5 +1,48 @@
 # INTEGRATION_DEMO_CHECK_RUNBOOK
 
+## 0. Quick Start (Bilgisayari Sifirdan Actiktan Sonra)
+Bu bölüm, projeyi en basit haliyle calistirmak icin hizli adimlari verir.
+
+### Terminal-1 (Backend)
+```bash
+cd C:\Users\oğuz\AgroNovaTech-AI
+git checkout integration-demo-check
+git pull origin integration-demo-check
+
+cd backend
+.venv\Scripts\activate
+uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
+```
+
+### Terminal-2 (Frontend)
+```bash
+cd C:\Users\oğuz\AgroNovaTech-AI
+git checkout integration-demo-check
+npm run dev
+```
+
+Tarayici:
+- `http://localhost:5173`
+
+### Hata olursa hizli cozum
+- UI `Failed to fetch` -> Backend kapali olabilir:
+```bash
+curl http://127.0.0.1:8000/api/v1/health
+```
+- `npm run dev` hata verirse:
+```bash
+npm install
+npm run dev
+```
+- `.venv` yoksa/bozulduysa:
+```bash
+cd backend
+python -m venv .venv
+.venv\Scripts\activate
+pip install -r requirements.txt
+uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
+```
+
 ## 1. Amaç
 `integration-demo-check` branch'i:
 - Ekip branch'lerinden gelen kodlari `main`e almadan once birlestirip test etmek icin kullanilir
@@ -286,4 +329,3 @@ GitHub PR:
 7. UI checklist gecti mi?
 8. Sorunlar branch bazli notlandi mi?
 9. PR acmaya hazir mi?
-
