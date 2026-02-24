@@ -1,0 +1,23 @@
+{
+  "parcel_id": "p1",
+  "season": "2026_Spring",
+  "risk_score": 68,
+  "risk_level": "RISKY",
+  "reasons": [
+    {
+      "code": "NEIGHBOR_INCOMPATIBLE",
+      "text": "Komşu parselde ayçiçek tespit edildi."
+    },
+    {
+      "code": "SAME_CROP_CLUSTERING",
+      "text": "Aynı ürün yoğunluğu yüksek."
+    }
+  ],
+  "recommendations": [
+    {
+      "type": "CROP_SUGGESTION",
+      "text": "Arpa veya mısır önerilir."
+    }
+  ],
+  "model_version": "rules_v1"
+}

@@ -1,0 +1,7 @@
+[
+  { "crop_id": "c_wheat", "crop_name": "Buğday" },
+  { "crop_id": "c_barley", "crop_name": "Arpa" },
+  { "crop_id": "c_sunflower", "crop_name": "Ayçiçek" },
+  { "crop_id": "c_corn", "crop_name": "Mısır" }
+]
+

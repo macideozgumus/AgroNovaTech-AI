@@ -1,0 +1,184 @@
+{
+  "info": {
+    "name": "Bilincli Ciftci Koyu API v1",
+    "_postman_id": "e6a6c6f4-0000-4d80-9000-000000000001",
+    "description": "TEKNOFEST 2026 demo API contract v1 requests.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:8000/api/v1"
+    },
+    {
+      "key": "village_id",
+      "value": "v1"
+    },
+    {
+      "key": "parcel_id",
+      "value": "p1"
+    },
+    {
+      "key": "season",
+      "value": "2026_Spring"
+    }
+  ],
+  "item": [
+    {
+      "name": "Auth - Login",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"email\": \"user@x.com\",\n  \"password\": \"*****\"\n}"
+        },
+        "url": {
+          "raw": "{{base_url}}/auth/login",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "auth",
+            "login"
+          ]
+        }
+      }
+    },
+    {
+      "name": "Villages - List",
+      "request": {
+        "method": "GET",
+        "url": {
+          "raw": "{{base_url}}/villages",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "villages"
+          ]
+        }
+      }
+    },
+    {
+      "name": "Parcels - List By Village",
+      "request": {
+        "method": "GET",
+        "url": {
+          "raw": "{{base_url}}/villages/{{village_id}}/parcels?season={{season}}",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "villages",
+            "{{village_id}}",
+            "parcels"
+          ],
+          "query": [
+            {
+              "key": "season",
+              "value": "{{season}}"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "Crops - List",
+      "request": {
+        "method": "GET",
+        "url": {
+          "raw": "{{base_url}}/crops",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "crops"
+          ]
+        }
+      }
+    },
+    {
+      "name": "Parcels - Update Crop Plan",
+      "request": {
+        "method": "PUT",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"season\": \"{{season}}\",\n  \"crop_id\": \"c_wheat\",\n  \"sowing_date\": \"2026-03-10\"\n}"
+        },
+        "url": {
+          "raw": "{{base_url}}/parcels/{{parcel_id}}/crop-plan",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "parcels",
+            "{{parcel_id}}",
+            "crop-plan"
+          ]
+        }
+      }
+    },
+    {
+      "name": "Decision - Score Village",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"village_id\": \"{{village_id}}\",\n  \"season\": \"{{season}}\"\n}"
+        },
+        "url": {
+          "raw": "{{base_url}}/decision/score",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "decision",
+            "score"
+          ]
+        }
+      }
+    },
+    {
+      "name": "Decision - Parcel Result",
+      "request": {
+        "method": "GET",
+        "url": {
+          "raw": "{{base_url}}/parcels/{{parcel_id}}/decision?season={{season}}",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "parcels",
+            "{{parcel_id}}",
+            "decision"
+          ],
+          "query": [
+            {
+              "key": "season",
+              "value": "{{season}}"
+            }
+          ]
+        }
+      }
+    }
+  ]
+}
+
