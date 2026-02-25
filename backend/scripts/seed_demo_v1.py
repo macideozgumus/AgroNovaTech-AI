@@ -85,6 +85,10 @@ def main() -> None:
         for parcel_id, name in PARS:
             db.add(Parcel(id=parcel_id, village_id=VILLAGE_ID, name=name, status="UNKNOWN"))
 
+        # Flush parent rows first so FK-dependent inserts (adjacency/crop plans)
+        # can safely reference village/parcel records in the same run.
+        db.flush()
+
         for p_id, n_id in ADJ:
             db.add(
                 ParcelAdjacency(
