@@ -1,72 +1,51 @@
-function FarmMap() {
-  return (
-    <div
-      style={{
-        height: "100%",
-        width: "100%",
-        display: "grid",
-        placeItems: "center",
-        background:
-          "linear-gradient(135deg, #dff3df 0%, #c6e7b7 35%, #f4edd2 100%)",
-        borderRight: "1px solid #d7dfd1",
-      }}
-    >
-      <div
-        style={{
-          width: "90%",
-          height: "85%",
-          borderRadius: "14px",
-          background: "rgba(255,255,255,0.65)",
-          border: "1px dashed #7aa874",
-          display: "grid",
-          gridTemplateColumns: "repeat(3, 1fr)",
-          gridTemplateRows: "repeat(3, 1fr)",
-          gap: "10px",
-          padding: "12px",
-        }}
-      >
-        {["P1", "P2", "P3", "P4", "P5", "P6", "P7", "P8"].map((parcel) => {
-          const color =
-            parcel === "P1"
-              ? "#f1c40f"
-              : parcel === "P5"
-              ? "#e74c3c"
-              : "#2ecc71";
+import { MapContainer, TileLayer, Polygon, Popup } from 'react-leaflet';
+import 'leaflet/dist/leaflet.css';
+import type { LatLngExpression } from 'leaflet';
 
-          return (
-            <button
-              key={parcel}
-              type="button"
-              style={{
-                border: "1px solid #d8dde3",
-                borderRadius: "10px",
-                background: "#fff",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                padding: "10px 12px",
-                color: "#2c3e50",
-                fontWeight: 600,
-              }}
-            >
-              <span>{parcel}</span>
-              <span
-                style={{
-                  width: "12px",
-                  height: "12px",
-                  borderRadius: "999px",
-                  backgroundColor: color,
-                  display: "inline-block",
-                }}
-              />
-            </button>
-          );
-        })}
-        <div />
-      </div>
-    </div>
-  );
+// Risk Seviyesi Renk Standartları
+export const RISK_LEVEL_COLORS = {
+  OK: '#2ecc71',       // GÜVENLİ
+  RISKY: '#f1c40f',    // RİSKLİ
+  CRITICAL: '#e74c3c', // KRİTİK
+  UNKNOWN: '#95a5a6'   // BELİRSİZ
+};
+
+interface FarmMapProps {
+  onSelect: (id: string) => void;
+  parcels: any[];
 }
 
-export default FarmMap;
+const FarmMap = ({ onSelect, parcels }: FarmMapProps) => {
+  const centerPoint: LatLngExpression = [39.8055, 32.8055];
 
+  return (
+    <MapContainer center={centerPoint} zoom={16} style={{ height: '100%', width: '100%', borderRadius: '12px' }}>
+      <TileLayer 
+        url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+        attribution='&copy; Esri Uydu Görüntüleri'
+      />
+      
+      {parcels.map((p) => (
+        <Polygon 
+          key={p.parcel_id}
+          positions={p.geometry as LatLngExpression[]} 
+          pathOptions={{ 
+            color: 'rgba(255,255,255,0.7)', 
+            fillColor: RISK_LEVEL_COLORS[p.risk_level as keyof typeof RISK_LEVEL_COLORS] || RISK_LEVEL_COLORS.UNKNOWN, 
+            fillOpacity: 0.5, 
+            weight: 2,
+            dashArray: '5, 5'
+          }}
+          eventHandlers={{ click: () => onSelect(p.parcel_id) }}
+        >
+          <Popup>
+            <strong>Parsel {p.name}</strong> <br />
+            Durum: {p.risk_level === 'OK' ? 'Güvenli' : p.risk_level === 'RISKY' ? 'Riskli' : 'Kritik'}
+          </Popup>
+        </Polygon>
+      ))}
+    </MapContainer>
+  );
+};
+
+export default FarmMap;
