@@ -71,7 +71,9 @@ function App() {
   const selectedParcel = parcels.find((p) => p.parcel_id === selectedParcelId) ?? null;
 
   const loadParcels = async () => {
-    const res = await apiGet<{ parcels: Parcel[] }>(`/villages/${VILLAGE_ID}/parcels?season=${SEASON}`);
+    const res = await apiGet<{ parcels: Parcel[] }>(
+      `/villages/${VILLAGE_ID}/parcels?season=${SEASON}`,
+    );
     setParcels(res.parcels);
     if (!selectedParcelId && res.parcels.length > 0) {
       setSelectedParcelId(res.parcels[0].parcel_id);
@@ -169,7 +171,11 @@ function App() {
 
       <div style={{ display: "flex", flex: 1, overflow: "hidden" }}>
         <div style={{ flex: 4, position: "relative", height: "100%" }}>
-          <FarmMap parcels={parcels} selectedParcelId={selectedParcelId} onSelect={setSelectedParcelId} />
+          <FarmMap
+            parcels={parcels}
+            selectedParcelId={selectedParcelId}
+            onSelect={setSelectedParcelId}
+          />
         </div>
 
         <div
