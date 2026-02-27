@@ -14,7 +14,6 @@ from sqlalchemy.exc import SQLAlchemyError
 from app.db.session import SessionLocal
 from app.models import CropCatalog, DecisionResult, Parcel, ParcelCropPlan, Village
 
-
 app = FastAPI(title="AgroNovaTech-AI Backend", version="v1-demo")
 
 app.add_middleware(
@@ -93,24 +92,14 @@ def sync_demo_state_from_db() -> None:
         village = db.get(Village, VILLAGE["village_id"])
         if not village:
             return
-
         crop_rows = db.query(CropCatalog).all()
         if crop_rows:
             global CROPS, CROP_NAME_MAP
-            CROPS = [
-                {"crop_id": row.id, "crop_name": row.crop_name}
-                for row in crop_rows
-            ]
+            CROPS = [{"crop_id": row.id, "crop_name": row.crop_name} for row in crop_rows]
             CROP_NAME_MAP = {item["crop_id"]: item["crop_name"] for item in CROPS}
-
-        plan_rows = (
-            db.query(ParcelCropPlan)
-            .filter(ParcelCropPlan.season == SEASON)
-            .all()
-        )
+        plan_rows = db.query(ParcelCropPlan).filter(ParcelCropPlan.season == SEASON).all()
         if plan_rows:
             STATE["crop_plan"] = {row.parcel_id: row.crop_id for row in plan_rows}
-
         latest_decisions = (
             db.query(DecisionResult)
             .filter(DecisionResult.season == SEASON)
@@ -146,59 +135,33 @@ def ensure_core_seed() -> None:
     try:
         if db.get(Village, VILLAGE["village_id"]) is not None:
             return
-
-        db.add(
-            Village(
-                id=VILLAGE["village_id"],
-                name=VILLAGE["name"],
-                center_lat=VILLAGE["center"]["lat"],
-                center_lng=VILLAGE["center"]["lng"],
-            )
-        )
-
+        db.add(Village(
+            id=VILLAGE["village_id"],
+            name=VILLAGE["name"],
+            center_lat=VILLAGE["center"]["lat"],
+            center_lng=VILLAGE["center"]["lng"],
+        ))
         for crop in CROPS:
             if db.get(CropCatalog, crop["crop_id"]) is None:
-                db.add(
-                    CropCatalog(
-                        id=crop["crop_id"],
-                        crop_name=crop["crop_name"],
-                        group_name=None,
-                        is_active=True,
-                    )
-                )
-
+                db.add(CropCatalog(id=crop["crop_id"], crop_name=crop["crop_name"], group_name=None, is_active=True))
         for parcel in PARCELS:
             if db.get(Parcel, parcel["parcel_id"]) is None:
-                db.add(
-                    Parcel(
-                        id=parcel["parcel_id"],
-                        village_id=VILLAGE["village_id"],
-                        name=parcel["name"],
-                        status="UNKNOWN",
-                    )
-                )
-
+                db.add(Parcel(id=parcel["parcel_id"], village_id=VILLAGE["village_id"], name=parcel["name"], status="UNKNOWN"))
         db.flush()
         for parcel_id, crop_id in STATE["crop_plan"].items():
-            existing = (
-                db.query(ParcelCropPlan)
-                .filter(
-                    ParcelCropPlan.parcel_id == parcel_id,
-                    ParcelCropPlan.season == SEASON,
-                )
-                .one_or_none()
-            )
+            existing = db.query(ParcelCropPlan).filter(
+                ParcelCropPlan.parcel_id == parcel_id,
+                ParcelCropPlan.season == SEASON,
+            ).one_or_none()
             if existing is None:
-                db.add(
-                    ParcelCropPlan(
-                        id=f"plan_{parcel_id}_{SEASON}",
-                        parcel_id=parcel_id,
-                        season=SEASON,
-                        crop_id=crop_id,
-                        sowing_date=None,
-                        notes="auto_seed",
-                    )
-                )
+                db.add(ParcelCropPlan(
+                    id=f"plan_{parcel_id}_{SEASON}",
+                    parcel_id=parcel_id,
+                    season=SEASON,
+                    crop_id=crop_id,
+                    sowing_date=None,
+                    notes="auto_seed",
+                ))
         db.commit()
     except SQLAlchemyError:
         db.rollback()
@@ -212,14 +175,10 @@ def persist_crop_plan(parcel_id: str, crop_id: str) -> None:
         return
     try:
         ensure_core_seed()
-        row = (
-            db.query(ParcelCropPlan)
-            .filter(
-                ParcelCropPlan.parcel_id == parcel_id,
-                ParcelCropPlan.season == SEASON,
-            )
-            .one_or_none()
-        )
+        row = db.query(ParcelCropPlan).filter(
+            ParcelCropPlan.parcel_id == parcel_id,
+            ParcelCropPlan.season == SEASON,
+        ).one_or_none()
         if row is None:
             row = ParcelCropPlan(
                 id=f"plan_{parcel_id}_{SEASON}",
@@ -249,21 +208,19 @@ def persist_decisions(decisions: Dict[str, Dict[str, Any]], decision_run_id: str
             parcel = db.get(Parcel, parcel_id)
             if parcel is not None:
                 parcel.status = payload["risk_level"]
-            db.add(
-                DecisionResult(
-                    id=f"dr_{decision_run_id}_{parcel_id}",
-                    village_id=VILLAGE["village_id"],
-                    parcel_id=parcel_id,
-                    season=SEASON,
-                    risk_score=payload["risk_score"],
-                    risk_level=payload["risk_level"],
-                    reasons_json=payload["reasons"],
-                    recommendations_json=payload["recommendations"],
-                    confidence=payload["confidence"],
-                    model_version=payload["model_version"],
-                    decision_run_id=decision_run_id,
-                )
-            )
+            db.add(DecisionResult(
+                id=f"dr_{decision_run_id}_{parcel_id}",
+                village_id=VILLAGE["village_id"],
+                parcel_id=parcel_id,
+                season=SEASON,
+                risk_score=payload["risk_score"],
+                risk_level=payload["risk_level"],
+                reasons_json=payload["reasons"],
+                recommendations_json=payload["recommendations"],
+                confidence=payload["confidence"],
+                model_version=payload["model_version"],
+                decision_run_id=decision_run_id,
+            ))
         db.commit()
     except SQLAlchemyError:
         db.rollback()
@@ -278,10 +235,7 @@ def read_latest_decision_from_db(parcel_id: str) -> Optional[Dict[str, Any]]:
     try:
         row = (
             db.query(DecisionResult)
-            .filter(
-                DecisionResult.parcel_id == parcel_id,
-                DecisionResult.season == SEASON,
-            )
+            .filter(DecisionResult.parcel_id == parcel_id, DecisionResult.season == SEASON)
             .order_by(desc(DecisionResult.created_at))
             .first()
         )
@@ -357,7 +311,6 @@ def build_recommendations(parcel_id: str, reason_codes: List[str]) -> List[Dict[
         recs.append({"type": "CROP_SUGGESTION", "text": "Munavebe icin farkli urun planlayin."})
     else:
         recs.append({"type": "ACTION", "text": "Mevcut plan uygun gorunuyor, sezon takibi yapin."})
-
     if parcel_id == "p1":
         recs.append({"type": "ACTION", "text": "Ekim tarihini 7-10 gun kaydirmak risk azaltabilir."})
     return recs
@@ -368,10 +321,8 @@ def compute_all_decisions() -> Dict[str, Dict[str, Any]]:
     crop_counts: Dict[str, int] = {}
     for crop_id in crop_plan.values():
         crop_counts[crop_id] = crop_counts.get(crop_id, 0) + 1
-
     unique_crops = len(set(crop_plan.values()))
     decisions: Dict[str, Dict[str, Any]] = {}
-
     for parcel in PARCELS:
         parcel_id = parcel["parcel_id"]
         crop_id = crop_plan.get(parcel_id)
@@ -387,11 +338,9 @@ def compute_all_decisions() -> Dict[str, Dict[str, Any]]:
                 "model_version": "rules_v1",
             }
             continue
-
         score = 0
         reason_codes: List[str] = []
         same_neighbors = 0
-
         for neighbor_id in ADJACENCY.get(parcel_id, []):
             neighbor_crop = crop_plan.get(neighbor_id)
             pair = (crop_id, neighbor_crop)
@@ -408,20 +357,16 @@ def compute_all_decisions() -> Dict[str, Dict[str, Any]]:
                 same_neighbors += 1
                 if "SAME_CROP_CLUSTERING" not in reason_codes:
                     reason_codes.append("SAME_CROP_CLUSTERING")
-
         if crop_counts.get(crop_id, 0) / len(PARCELS) >= 0.5:
             if "SAME_CROP_CLUSTERING" not in reason_codes:
                 reason_codes.append("SAME_CROP_CLUSTERING")
             score += 15
-
         if unique_crops > 3:
             if "HIGH_DIVERSITY_PRESSURE" not in reason_codes:
                 reason_codes.append("HIGH_DIVERSITY_PRESSURE")
             score += 10
-
         if same_neighbors >= 2:
             score += 8
-
         score = max(0, min(100, score))
         decisions[parcel_id] = {
             "parcel_id": parcel_id,
@@ -433,7 +378,6 @@ def compute_all_decisions() -> Dict[str, Dict[str, Any]]:
             "confidence": 0.72,
             "model_version": "rules_v1",
         }
-
     return decisions
 
 
@@ -444,7 +388,7 @@ def ensure_decisions() -> None:
 
 @app.get("/")
 def root():
-    return {"message": "AgroNovaTech-AI backend is running"}
+    return {"message": "AgroNovaTech-AI backend is running", "version": "v1-demo"}
 
 
 @app.get("/api/v1/health")
@@ -488,22 +432,19 @@ def village_parcels(village_id: str, season: str = Query(...)):
         raise HTTPException(status_code=400, detail="Unsupported season")
     sync_demo_state_from_db()
     ensure_decisions()
-
     items = []
     for parcel in PARCELS:
         pid = parcel["parcel_id"]
         crop_id = STATE["crop_plan"].get(pid)
         decision = STATE["decisions"].get(pid)
-        items.append(
-            {
-                "parcel_id": pid,
-                "name": parcel["name"],
-                "status": decision["risk_level"] if decision else "UNKNOWN",
-                "crop": {"crop_id": crop_id, "crop_name": CROP_NAME_MAP.get(crop_id, "")} if crop_id else None,
-                "risk_score": decision["risk_score"] if decision else None,
-                "risk_level": decision["risk_level"] if decision else None,
-            }
-        )
+        items.append({
+            "parcel_id": pid,
+            "name": parcel["name"],
+            "status": decision["risk_level"] if decision else "UNKNOWN",
+            "crop": {"crop_id": crop_id, "crop_name": CROP_NAME_MAP.get(crop_id, "")} if crop_id else None,
+            "risk_score": decision["risk_score"] if decision else None,
+            "risk_level": decision["risk_level"] if decision else None,
+        })
     return {"village_id": village_id, "season": season, "parcels": items}
 
 
@@ -571,10 +512,7 @@ def village_summary(village_id: str, season: str = Query(...)):
         "season": season,
         "risk_distribution": dist,
         "shared_recommendations": [
-            {
-                "type": "VILLAGE_PLAN",
-                "text": "Aycicek ve bugday komsulugunu azaltarak koy geneli risk dusurulebilir.",
-            }
+            {"type": "VILLAGE_PLAN", "text": "Aycicek ve bugday komsulugunu azaltarak koy geneli risk dusurulebilir."}
         ],
         "model_version": "rules_v1",
     }
