@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 from app.routes.health import router as health_router
 from app.routes.parcels import router as parcels_router
+from app.routes.risk import router as risk_router
 
 app = FastAPI(title="AgroNovaTech-AI Backend")
 
@@ -10,3 +11,4 @@ def root():
 
 app.include_router(health_router)
 app.include_router(parcels_router)
+app.include_router(risk_router)
