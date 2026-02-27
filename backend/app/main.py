@@ -1,9 +1,18 @@
 from copy import deepcopy
-from datetime import datetime, timezone
-from typing import Any, Dict, List
+from datetime import date, datetime, timezone
+import base64
+import hashlib
+import hmac
+import json
+from typing import Any, Dict, List, Optional
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import desc
+from sqlalchemy.exc import SQLAlchemyError
+
+from app.db.session import SessionLocal
+from app.models import CropCatalog, DecisionResult, Parcel, ParcelCropPlan, Village
 
 
 app = FastAPI(title="AgroNovaTech-AI Backend", version="v1-demo")
@@ -66,10 +75,254 @@ STATE: Dict[str, Any] = {
     "decisions": {},
     "last_job_id": None,
 }
+JWT_SECRET = "agronovatech-demo-secret"
+
+
+def db_session():
+    try:
+        return SessionLocal()
+    except Exception:
+        return None
+
+
+def sync_demo_state_from_db() -> None:
+    db = db_session()
+    if db is None:
+        return
+    try:
+        village = db.get(Village, VILLAGE["village_id"])
+        if not village:
+            return
+
+        crop_rows = db.query(CropCatalog).all()
+        if crop_rows:
+            global CROPS, CROP_NAME_MAP
+            CROPS = [
+                {"crop_id": row.id, "crop_name": row.crop_name}
+                for row in crop_rows
+            ]
+            CROP_NAME_MAP = {item["crop_id"]: item["crop_name"] for item in CROPS}
+
+        plan_rows = (
+            db.query(ParcelCropPlan)
+            .filter(ParcelCropPlan.season == SEASON)
+            .all()
+        )
+        if plan_rows:
+            STATE["crop_plan"] = {row.parcel_id: row.crop_id for row in plan_rows}
+
+        latest_decisions = (
+            db.query(DecisionResult)
+            .filter(DecisionResult.season == SEASON)
+            .order_by(desc(DecisionResult.created_at))
+            .all()
+        )
+        mapped: Dict[str, Dict[str, Any]] = {}
+        for row in latest_decisions:
+            if not row.parcel_id or row.parcel_id in mapped:
+                continue
+            mapped[row.parcel_id] = {
+                "parcel_id": row.parcel_id,
+                "season": row.season,
+                "risk_score": row.risk_score,
+                "risk_level": row.risk_level,
+                "reasons": row.reasons_json,
+                "recommendations": row.recommendations_json,
+                "confidence": row.confidence,
+                "model_version": row.model_version,
+            }
+        if mapped:
+            STATE["decisions"] = mapped
+    except SQLAlchemyError:
+        pass
+    finally:
+        db.close()
+
+
+def ensure_core_seed() -> None:
+    db = db_session()
+    if db is None:
+        return
+    try:
+        if db.get(Village, VILLAGE["village_id"]) is not None:
+            return
+
+        db.add(
+            Village(
+                id=VILLAGE["village_id"],
+                name=VILLAGE["name"],
+                center_lat=VILLAGE["center"]["lat"],
+                center_lng=VILLAGE["center"]["lng"],
+            )
+        )
+
+        for crop in CROPS:
+            if db.get(CropCatalog, crop["crop_id"]) is None:
+                db.add(
+                    CropCatalog(
+                        id=crop["crop_id"],
+                        crop_name=crop["crop_name"],
+                        group_name=None,
+                        is_active=True,
+                    )
+                )
+
+        for parcel in PARCELS:
+            if db.get(Parcel, parcel["parcel_id"]) is None:
+                db.add(
+                    Parcel(
+                        id=parcel["parcel_id"],
+                        village_id=VILLAGE["village_id"],
+                        name=parcel["name"],
+                        status="UNKNOWN",
+                    )
+                )
+
+        db.flush()
+        for parcel_id, crop_id in STATE["crop_plan"].items():
+            existing = (
+                db.query(ParcelCropPlan)
+                .filter(
+                    ParcelCropPlan.parcel_id == parcel_id,
+                    ParcelCropPlan.season == SEASON,
+                )
+                .one_or_none()
+            )
+            if existing is None:
+                db.add(
+                    ParcelCropPlan(
+                        id=f"plan_{parcel_id}_{SEASON}",
+                        parcel_id=parcel_id,
+                        season=SEASON,
+                        crop_id=crop_id,
+                        sowing_date=None,
+                        notes="auto_seed",
+                    )
+                )
+        db.commit()
+    except SQLAlchemyError:
+        db.rollback()
+    finally:
+        db.close()
+
+
+def persist_crop_plan(parcel_id: str, crop_id: str) -> None:
+    db = db_session()
+    if db is None:
+        return
+    try:
+        ensure_core_seed()
+        row = (
+            db.query(ParcelCropPlan)
+            .filter(
+                ParcelCropPlan.parcel_id == parcel_id,
+                ParcelCropPlan.season == SEASON,
+            )
+            .one_or_none()
+        )
+        if row is None:
+            row = ParcelCropPlan(
+                id=f"plan_{parcel_id}_{SEASON}",
+                parcel_id=parcel_id,
+                season=SEASON,
+                crop_id=crop_id,
+                sowing_date=date(2026, 3, 10),
+                notes="ui_update",
+            )
+            db.add(row)
+        else:
+            row.crop_id = crop_id
+        db.commit()
+    except SQLAlchemyError:
+        db.rollback()
+    finally:
+        db.close()
+
+
+def persist_decisions(decisions: Dict[str, Dict[str, Any]], decision_run_id: str) -> None:
+    db = db_session()
+    if db is None:
+        return
+    try:
+        ensure_core_seed()
+        for parcel_id, payload in decisions.items():
+            parcel = db.get(Parcel, parcel_id)
+            if parcel is not None:
+                parcel.status = payload["risk_level"]
+            db.add(
+                DecisionResult(
+                    id=f"dr_{decision_run_id}_{parcel_id}",
+                    village_id=VILLAGE["village_id"],
+                    parcel_id=parcel_id,
+                    season=SEASON,
+                    risk_score=payload["risk_score"],
+                    risk_level=payload["risk_level"],
+                    reasons_json=payload["reasons"],
+                    recommendations_json=payload["recommendations"],
+                    confidence=payload["confidence"],
+                    model_version=payload["model_version"],
+                    decision_run_id=decision_run_id,
+                )
+            )
+        db.commit()
+    except SQLAlchemyError:
+        db.rollback()
+    finally:
+        db.close()
+
+
+def read_latest_decision_from_db(parcel_id: str) -> Optional[Dict[str, Any]]:
+    db = db_session()
+    if db is None:
+        return None
+    try:
+        row = (
+            db.query(DecisionResult)
+            .filter(
+                DecisionResult.parcel_id == parcel_id,
+                DecisionResult.season == SEASON,
+            )
+            .order_by(desc(DecisionResult.created_at))
+            .first()
+        )
+        if row is None:
+            return None
+        return {
+            "parcel_id": row.parcel_id,
+            "season": row.season,
+            "risk_score": row.risk_score,
+            "risk_level": row.risk_level,
+            "reasons": row.reasons_json,
+            "recommendations": row.recommendations_json,
+            "confidence": row.confidence,
+            "model_version": row.model_version,
+        }
+    except SQLAlchemyError:
+        return None
+    finally:
+        db.close()
 
 
 def now_iso() -> str:
     return datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
+
+
+def _b64url(data: bytes) -> str:
+    return base64.urlsafe_b64encode(data).rstrip(b"=").decode("ascii")
+
+
+def create_demo_jwt(email: str, role: str = "FARMER") -> str:
+    header = {"alg": "HS256", "typ": "JWT"}
+    payload = {
+        "sub": email,
+        "role": role,
+        "iat": int(datetime.now(timezone.utc).timestamp()),
+    }
+    header_b64 = _b64url(json.dumps(header, separators=(",", ":")).encode("utf-8"))
+    payload_b64 = _b64url(json.dumps(payload, separators=(",", ":")).encode("utf-8"))
+    message = f"{header_b64}.{payload_b64}".encode("ascii")
+    signature = hmac.new(JWT_SECRET.encode("utf-8"), message, hashlib.sha256).digest()
+    return f"{header_b64}.{payload_b64}.{_b64url(signature)}"
 
 
 def risk_level_from_score(score: int) -> str:
@@ -143,11 +396,11 @@ def compute_all_decisions() -> Dict[str, Dict[str, Any]]:
             neighbor_crop = crop_plan.get(neighbor_id)
             pair = (crop_id, neighbor_crop)
             if pair in HIGH_INCOMPATIBLE:
-                score += 45
+                score += 30
                 if "NEIGHBOR_INCOMPATIBLE" not in reason_codes:
                     reason_codes.append("NEIGHBOR_INCOMPATIBLE")
             elif pair in MEDIUM_INCOMPATIBLE:
-                score += 22
+                score += 18
                 if "NEIGHBOR_INCOMPATIBLE" not in reason_codes:
                     reason_codes.append("NEIGHBOR_INCOMPATIBLE")
             elif neighbor_crop == crop_id:
@@ -200,10 +453,14 @@ def health_check():
 
 
 @app.post("/api/v1/auth/login")
-def login(_: Dict[str, Any]):
+def login(payload: Dict[str, Any]):
+    email = payload.get("email")
+    password = payload.get("password")
+    if not email or not password:
+        raise HTTPException(status_code=400, detail="email and password are required")
     return {
         "ok": True,
-        "access_token": "demo-jwt-token",
+        "access_token": create_demo_jwt(str(email)),
         "token_type": "bearer",
         "role": "FARMER",
     }
@@ -211,11 +468,15 @@ def login(_: Dict[str, Any]):
 
 @app.get("/api/v1/villages")
 def villages():
+    ensure_core_seed()
+    sync_demo_state_from_db()
     return {"villages": [VILLAGE]}
 
 
 @app.get("/api/v1/crops")
 def crops():
+    ensure_core_seed()
+    sync_demo_state_from_db()
     return {"crops": CROPS}
 
 
@@ -225,6 +486,7 @@ def village_parcels(village_id: str, season: str = Query(...)):
         raise HTTPException(status_code=404, detail="Village not found")
     if season != SEASON:
         raise HTTPException(status_code=400, detail="Unsupported season")
+    sync_demo_state_from_db()
     ensure_decisions()
 
     items = []
@@ -256,6 +518,7 @@ def update_crop(parcel_id: str, payload: Dict[str, Any]):
         raise HTTPException(status_code=400, detail="Invalid crop_id")
     STATE["crop_plan"][parcel_id] = crop_id
     STATE["decisions"] = {}
+    persist_crop_plan(parcel_id, crop_id)
     return {"ok": True, "parcel_id": parcel_id, "season": SEASON}
 
 
@@ -265,8 +528,10 @@ def score(payload: Dict[str, Any]):
         raise HTTPException(status_code=404, detail="Village not found")
     if payload.get("season") != SEASON:
         raise HTTPException(status_code=400, detail="Unsupported season")
+    sync_demo_state_from_db()
     STATE["decisions"] = compute_all_decisions()
-    STATE["last_job_id"] = "djob_{}".format(int(datetime.now().timestamp()))
+    STATE["last_job_id"] = datetime.now(timezone.utc).strftime("djob_%Y%m%d%H%M%S%f")
+    persist_decisions(STATE["decisions"], STATE["last_job_id"])
     return {
         "ok": True,
         "job_id": STATE["last_job_id"],
@@ -281,6 +546,9 @@ def parcel_decision(parcel_id: str, season: str = Query(...)):
         raise HTTPException(status_code=404, detail="Parcel not found")
     if season != SEASON:
         raise HTTPException(status_code=400, detail="Unsupported season")
+    db_decision = read_latest_decision_from_db(parcel_id)
+    if db_decision is not None:
+        return db_decision
     ensure_decisions()
     if parcel_id not in STATE["decisions"]:
         raise HTTPException(status_code=404, detail="Decision not found")
@@ -289,6 +557,7 @@ def parcel_decision(parcel_id: str, season: str = Query(...)):
 
 @app.get("/api/v1/villages/{village_id}/decision-summary")
 def village_summary(village_id: str, season: str = Query(...)):
+    sync_demo_state_from_db()
     if village_id != VILLAGE["village_id"]:
         raise HTTPException(status_code=404, detail="Village not found")
     if season != SEASON:
