@@ -70,15 +70,28 @@ function App() {
 
   const selectedParcel = parcels.find((p) => p.parcel_id === selectedParcelId) ?? null;
 
-  const loadParcels = async () => {
+  const loadParcels = async (): Promise<Parcel[]> => {
     const res = await apiGet<{ parcels: Parcel[] }>(
       `/villages/${VILLAGE_ID}/parcels?season=${SEASON}`,
     );
+
     setParcels(res.parcels);
-    if (!selectedParcelId && res.parcels.length > 0) {
-      setSelectedParcelId(res.parcels[0].parcel_id);
-      setSelectedCropId(res.parcels[0].crop?.crop_id ?? "");
+
+    const activeParcelId =
+      selectedParcelId && res.parcels.some((parcel) => parcel.parcel_id === selectedParcelId)
+        ? selectedParcelId
+        : (res.parcels[0]?.parcel_id ?? null);
+
+    if (activeParcelId) {
+      const activeParcel = res.parcels.find((parcel) => parcel.parcel_id === activeParcelId) ?? null;
+      setSelectedParcelId(activeParcelId);
+      setSelectedCropId(activeParcel?.crop?.crop_id ?? "");
+    } else {
+      setSelectedParcelId(null);
+      setSelectedCropId("");
     }
+
+    return res.parcels;
   };
 
   const loadDecision = async (parcelId: string) => {
@@ -91,9 +104,16 @@ function App() {
     setError("");
     try {
       await apiSend("/decision/score", "POST", { village_id: VILLAGE_ID, season: SEASON });
-      await loadParcels();
-      if (selectedParcelId) {
-        await loadDecision(selectedParcelId);
+      const refreshedParcels = await loadParcels();
+      const activeParcelId =
+        selectedParcelId && refreshedParcels.some((parcel) => parcel.parcel_id === selectedParcelId)
+          ? selectedParcelId
+          : (refreshedParcels[0]?.parcel_id ?? null);
+
+      if (activeParcelId) {
+        await loadDecision(activeParcelId);
+      } else {
+        setDecision(null);
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Hesaplama hatasi");
@@ -119,11 +139,14 @@ function App() {
   }, []);
 
   useEffect(() => {
-    if (!selectedParcelId) return;
+    if (!selectedParcelId) {
+      setDecision(null);
+      return;
+    }
     setSelectedCropId(selectedParcel?.crop?.crop_id ?? "");
     void loadDecision(selectedParcelId).catch(() => undefined);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedParcelId]);
+  }, [selectedParcelId, parcels]);
 
   const saveCropAndRecalculate = async () => {
     if (!selectedParcelId || !selectedCropId) return;
