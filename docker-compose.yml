@@ -1,0 +1,41 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: agronova-postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: agronovatech_ai
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d agronovatech_ai"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    image: python:3.9-slim
+    container_name: agronova-api
+    working_dir: /workspace/backend
+    environment:
+      DATABASE_URL: postgresql+psycopg2://postgres:postgres@postgres:5432/agronovatech_ai
+      PYTHONDONTWRITEBYTECODE: "1"
+      PYTHONUNBUFFERED: "1"
+    command: >
+      sh -c "pip install --no-cache-dir -r requirements.txt &&
+      alembic upgrade head &&
+      python scripts/seed_demo_v1.py &&
+      uvicorn app.main:app --host 0.0.0.0 --port 8000"
+    volumes:
+      - ./backend:/workspace/backend
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
