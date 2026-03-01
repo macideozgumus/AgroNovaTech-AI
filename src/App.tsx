@@ -9,6 +9,10 @@ type Parcel = {
   crop: Crop | null;
   risk_score: number | null;
   risk_level: "UNKNOWN" | "OK" | "RISKY" | "CRITICAL" | null;
+  field_block?: {
+    field_block_id: string;
+    name: string;
+  } | null;
 };
 type ParcelDecision = {
   parcel_id: string;

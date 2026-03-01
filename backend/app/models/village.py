@@ -17,4 +17,5 @@ class Village(Base):
     center_lng: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     created_at: Mapped[object] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
+    field_blocks = relationship("FieldBlock", back_populates="village")
     parcels = relationship("Parcel", back_populates="village")

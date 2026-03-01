@@ -22,18 +22,26 @@ class TestDemoScenarios(unittest.TestCase):
 
     def test_default_demo_p1_is_risky(self) -> None:
         backend_main.STATE["crop_plan"] = {
-            "p1": "c_wheat",
-            "p2": "c_sunflower",
-            "p3": "c_wheat",
-            "p4": "c_wheat",
-            "p5": "c_sunflower",
-            "p6": "c_corn",
-            "p7": "c_barley",
-            "p8": "c_wheat",
+            "a_p1": "c_wheat",
+            "a_p2": "c_sunflower",
+            "a_p3": "c_wheat",
+            "a_p4": "c_wheat",
+            "a_p5": "c_wheat",
+            "a_p6": "c_sunflower",
+            "a_p7": "c_corn",
+            "a_p8": "c_barley",
+            "b_p1": "c_wheat",
+            "b_p2": "c_barley",
+            "b_p3": "c_wheat",
+            "b_p4": "c_corn",
+            "b_p5": "c_wheat",
+            "b_p6": "c_sunflower",
+            "b_p7": "c_wheat",
+            "b_p8": "c_wheat",
         }
 
         decisions = backend_main.compute_all_decisions()
-        p1 = decisions["p1"]
+        p1 = decisions["a_p1"]
 
         self.assertEqual(p1["risk_score"], 68)
         self.assertEqual(p1["risk_level"], "RISKY")
@@ -41,18 +49,26 @@ class TestDemoScenarios(unittest.TestCase):
 
     def test_adjusted_demo_p5_is_ok(self) -> None:
         backend_main.STATE["crop_plan"] = {
-            "p1": "c_wheat",
-            "p2": "c_wheat",
-            "p3": "c_sunflower",
-            "p4": "c_wheat",
-            "p5": "c_barley",
-            "p6": "c_corn",
-            "p7": "c_wheat",
-            "p8": "c_wheat",
+            "a_p1": "c_wheat",
+            "a_p2": "c_wheat",
+            "a_p3": "c_sunflower",
+            "a_p4": "c_wheat",
+            "a_p5": "c_barley",
+            "a_p6": "c_corn",
+            "a_p7": "c_wheat",
+            "a_p8": "c_wheat",
+            "b_p1": "c_barley",
+            "b_p2": "c_barley",
+            "b_p3": "c_wheat",
+            "b_p4": "c_corn",
+            "b_p5": "c_barley",
+            "b_p6": "c_barley",
+            "b_p7": "c_wheat",
+            "b_p8": "c_barley",
         }
 
         decisions = backend_main.compute_all_decisions()
-        p5 = decisions["p5"]
+        p5 = decisions["a_p5"]
 
         self.assertEqual(p5["risk_score"], 10)
         self.assertEqual(p5["risk_level"], "OK")
