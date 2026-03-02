@@ -1,3 +1,5 @@
+import { useMemo, useState, type CSSProperties } from "react";
+
 type Parcel = {
   parcel_id: string;
   name: string;
@@ -29,7 +31,13 @@ const riskColor = (level?: string | null) => {
 };
 
 function FarmMap({ parcels, selectedParcelId, onSelect }: Props) {
-  const groupedParcels = parcels.reduce<Record<string, Parcel[]>>((acc, parcel) => {
+  const [secondaryFieldPosition, setSecondaryFieldPosition] = useState<
+    "top" | "right" | "bottom" | "left"
+  >("right");
+
+  const groupedParcels = useMemo(
+    () =>
+      parcels.reduce<Record<string, Parcel[]>>((acc, parcel) => {
     const numericId = Number.parseInt(parcel.parcel_id.replace(/\D/g, ""), 10);
     const fallbackBlockName =
       Number.isFinite(numericId) && numericId > 4 ? "Tarla Blogu B" : "Tarla Blogu A";
@@ -39,7 +47,9 @@ function FarmMap({ parcels, selectedParcelId, onSelect }: Props) {
     }
     acc[blockName].push(parcel);
     return acc;
-  }, {});
+  }, {}),
+    [parcels],
+  );
 
   if (!groupedParcels["Tarla Blogu A"]) {
     groupedParcels["Tarla Blogu A"] = [];
@@ -48,7 +58,89 @@ function FarmMap({ parcels, selectedParcelId, onSelect }: Props) {
     groupedParcels["Tarla Blogu B"] = [];
   }
 
-  const orderedBlocks = ["Tarla Blogu A", "Tarla Blogu B"];
+  const blockSlots: Record<"top" | "right" | "bottom" | "left" | "center", CSSProperties> = {
+    top: { gridColumn: 2, gridRow: 1 },
+    right: { gridColumn: 3, gridRow: 2 },
+    bottom: { gridColumn: 2, gridRow: 3 },
+    left: { gridColumn: 1, gridRow: 2 },
+    center: { gridColumn: 2, gridRow: 2 },
+  };
+
+  const renderFieldBlock = (blockName: string, blockParcels: Parcel[]) => {
+    const emptySlots = Math.max(0, 8 - blockParcels.length);
+
+    return (
+      <section
+        key={blockName}
+        style={{
+          borderRadius: "10px",
+          background: "rgba(255,255,255,0.82)",
+          border: "1px solid #d8dde3",
+          padding: "10px",
+          display: "grid",
+          gap: "8px",
+          minWidth: "280px",
+          boxShadow: "0 10px 24px rgba(27, 62, 37, 0.08)",
+        }}
+      >
+        <div style={{ fontSize: "0.8rem", fontWeight: 700, color: "#48624a" }}>{blockName}</div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: "8px" }}>
+          {blockParcels.map((parcel) => (
+            <button
+              key={parcel.parcel_id}
+              type="button"
+              onClick={() => onSelect(parcel.parcel_id)}
+              style={{
+                border:
+                  selectedParcelId === parcel.parcel_id
+                    ? "2px solid #2980b9"
+                    : "1px solid #d8dde3",
+                borderRadius: "10px",
+                background: "#fff",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                padding: "10px 12px",
+                color: "#2c3e50",
+                fontWeight: 600,
+                cursor: "pointer",
+              }}
+            >
+              <span>{parcel.name}</span>
+              <span
+                style={{
+                  width: "12px",
+                  height: "12px",
+                  borderRadius: "999px",
+                  backgroundColor: riskColor(parcel.risk_level ?? parcel.status),
+                  display: "inline-block",
+                }}
+              />
+            </button>
+          ))}
+          {Array.from({ length: emptySlots }, (_, index) => (
+            <div
+              key={`${blockName}-empty-${index}`}
+              style={{
+                border: "1px dashed #c9d4da",
+                borderRadius: "10px",
+                background: "rgba(255,255,255,0.45)",
+                minHeight: "42px",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                color: "#8a97a3",
+                fontSize: "0.78rem",
+                fontWeight: 600,
+              }}
+            >
+              Bos Parsel
+            </div>
+          ))}
+        </div>
+      </section>
+    );
+  };
 
   return (
     <div
@@ -64,94 +156,101 @@ function FarmMap({ parcels, selectedParcelId, onSelect }: Props) {
     >
       <div
         style={{
-          width: "90%",
-          height: "85%",
-          borderRadius: "14px",
-          background: "rgba(255,255,255,0.65)",
-          border: "1px dashed #7aa874",
-          display: "grid",
-          gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
-          gap: "14px",
-          padding: "12px",
-          alignContent: "start",
-        }}
-      >
-        {orderedBlocks.map((blockName) => {
-          const blockParcels = groupedParcels[blockName] ?? [];
-          const emptySlots = Math.max(0, 8 - blockParcels.length);
+        width: "90%",
+        height: "85%",
+        borderRadius: "14px",
+        background: "rgba(255,255,255,0.6)",
+        border: "1px dashed #7aa874",
+        padding: "12px",
+        display: "grid",
+        gridTemplateRows: "auto 1fr",
+        gap: "12px",
+      }}
+    >
+        <section
+          style={{
+            borderRadius: "10px",
+            background: "rgba(255,255,255,0.74)",
+            border: "1px solid #d8dde3",
+            padding: "10px 12px",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: "12px",
+          }}
+        >
+          <div style={{ display: "grid", gap: "4px" }}>
+            <div style={{ fontWeight: 700, color: "#2f4f34" }}>Tarla B Konumlandirma</div>
+            <div style={{ fontSize: "0.78rem", color: "#687781" }}>
+              Kullanicinin ikinci tarlayi Tarla A&apos;nin hangi kenarina yerlestirecegini sec.
+            </div>
+          </div>
+          <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", justifyContent: "flex-end" }}>
+            {[
+              { value: "top", label: "Ust" },
+              { value: "right", label: "Sag" },
+              { value: "bottom", label: "Alt" },
+              { value: "left", label: "Sol" },
+            ].map((option) => (
+              <button
+                key={option.value}
+                type="button"
+                onClick={() =>
+                  setSecondaryFieldPosition(option.value as "top" | "right" | "bottom" | "left")
+                }
+                style={{
+                  border:
+                    secondaryFieldPosition === option.value
+                      ? "2px solid #2f80ed"
+                      : "1px solid #c9d4da",
+                  background:
+                    secondaryFieldPosition === option.value ? "#eef6ff" : "rgba(255,255,255,0.9)",
+                  color: "#24435b",
+                  fontWeight: 700,
+                  borderRadius: "999px",
+                  padding: "8px 14px",
+                  cursor: "pointer",
+                }}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+        </section>
 
-          return (
-          <section
-            key={blockName}
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "minmax(220px, 1fr) minmax(280px, 1.2fr) minmax(220px, 1fr)",
+            gridTemplateRows: "minmax(120px, auto) minmax(220px, auto) minmax(120px, auto)",
+            gap: "12px",
+            alignItems: "center",
+            justifyItems: "center",
+            minHeight: 0,
+          }}
+        >
+          <div
             style={{
-              borderRadius: "10px",
-              background: "rgba(255,255,255,0.75)",
-              border: "1px solid #d8dde3",
-              padding: "10px",
+              ...blockSlots.center,
+              width: "100%",
               display: "grid",
               gap: "8px",
             }}
           >
-            <div style={{ fontSize: "0.8rem", fontWeight: 700, color: "#48624a" }}>
-              {blockName}
-            </div>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: "8px" }}>
-              {blockParcels.map((parcel) => (
-                <button
-                  key={parcel.parcel_id}
-                  type="button"
-                  onClick={() => onSelect(parcel.parcel_id)}
-                  style={{
-                    border:
-                      selectedParcelId === parcel.parcel_id
-                        ? "2px solid #2980b9"
-                        : "1px solid #d8dde3",
-                    borderRadius: "10px",
-                    background: "#fff",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                    padding: "10px 12px",
-                    color: "#2c3e50",
-                    fontWeight: 600,
-                    cursor: "pointer",
-                  }}
-                >
-                  <span>{parcel.name}</span>
-                  <span
-                    style={{
-                      width: "12px",
-                      height: "12px",
-                      borderRadius: "999px",
-                      backgroundColor: riskColor(parcel.risk_level ?? parcel.status),
-                      display: "inline-block",
-                    }}
-                  />
-                </button>
-              ))}
-              {Array.from({ length: emptySlots }, (_, index) => (
-                <div
-                  key={`${blockName}-empty-${index}`}
-                  style={{
-                    border: "1px dashed #c9d4da",
-                    borderRadius: "10px",
-                    background: "rgba(255,255,255,0.45)",
-                    minHeight: "42px",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    color: "#8a97a3",
-                    fontSize: "0.78rem",
-                    fontWeight: 600,
-                  }}
-                >
-                  Bos Parsel
-                </div>
-              ))}
-            </div>
-          </section>
-          );
-        })}
+            {renderFieldBlock("Tarla Blogu A", groupedParcels["Tarla Blogu A"])}
+          </div>
+
+          <div
+            style={{
+              ...blockSlots[secondaryFieldPosition],
+              width: "100%",
+              display: "grid",
+              gap: "8px",
+            }}
+          >
+            {renderFieldBlock("Tarla Blogu B", groupedParcels["Tarla Blogu B"])}
+          </div>
+        </div>
       </div>
     </div>
   );
