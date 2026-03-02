@@ -12,6 +12,10 @@ V1'deki tek bloklu demo yapiyi, ayni koy icinde birden fazla tarla blogunu (`Fie
 - `ParcelAdjacency` artik komsulugun tipini de tasir:
   - `INTRA_BLOCK`
   - `INTER_BLOCK`
+- UI yerlesim kurali:
+  - `Tarla Blogu A` merkezde sabitlenir
+  - `Tarla Blogu B`, kullanici tarafindan `ust`, `sag`, `alt`, `sol` kenarlarindan birine yerlestirilir
+  - `INTER_BLOCK` komsuluklari secilen kenara gore degisir
 
 ## Veri Modeli Degisiklikleri
 
@@ -21,6 +25,9 @@ V1'deki tek bloklu demo yapiyi, ayni koy icinde birden fazla tarla blogunu (`Fie
 - `name`
 - `display_order`
 - `geometry_json` (opsiyonel)
+- `placement_mode` (opsiyonel)
+  - `CENTER_FIXED`
+  - `EDGE_SELECTABLE`
 - `created_at`
 
 ### `Parcel` (v2 ek alan)
@@ -44,14 +51,41 @@ Ornek response:
     {
       "field_block_id": "fb_a",
       "name": "Tarla Blogu A",
-      "display_order": 1
+      "display_order": 1,
+      "placement_mode": "CENTER_FIXED"
     },
     {
       "field_block_id": "fb_b",
       "name": "Tarla Blogu B",
-      "display_order": 2
+      "display_order": 2,
+      "placement_mode": "EDGE_SELECTABLE"
     }
   ]
+}
+```
+
+### `PUT /api/v2/villages/{villageId}/field-layout`
+Tarla Blogu B'nin Tarla Blogu A'nin hangi kenarina yerlestirilecegini belirler.
+
+Ornek request:
+```json
+{
+  "anchor_field_block_id": "fb_a",
+  "movable_field_block_id": "fb_b",
+  "position": "right"
+}
+```
+
+Ornek response:
+```json
+{
+  "ok": true,
+  "village_id": "v1",
+  "layout": {
+    "anchor_field_block_id": "fb_a",
+    "movable_field_block_id": "fb_b",
+    "position": "right"
+  }
 }
 ```
 
@@ -84,13 +118,15 @@ Ornek response:
 ```
 
 ### `GET /api/v2/parcels/{parcelId}/neighbors?season=2026_Spring`
-Secili parselin blok ici ve bloklar arasi komsularini ayri listeler.
+Secili parselin blok ici ve bloklar arasi komsularini ayri listeler. `INTER_BLOCK`
+komsulari aktif tarla yerlesimine gore hesaplanir.
 
 Ornek response:
 ```json
 {
   "parcel_id": "a_p4",
   "season": "2026_Spring",
+  "layout_position": "right",
   "neighbors": {
     "intra_block": [
       { "parcel_id": "a_p1", "adjacency_type": "INTRA_BLOCK" }
@@ -111,7 +147,7 @@ Toplam risk:
 `R = R_intra + R_inter + R_density + R_village`
 
 - `R_intra`: ayni blok icindeki uyumsuz komsular
-- `R_inter`: diger bloktan sinir komsulari
+- `R_inter`: diger bloktan sinir komsulari (`Tarla B` konumuna gore degisir)
 - `R_density`: ayni urun yogunlugu
 - `R_village`: koy geneli dagilim baskisi
 
@@ -122,8 +158,10 @@ Ornek agirliklar:
 - koyde urun cesidi > 3: `+10`
 
 ## V2 Kabul Kriterleri
-- UI iki blogu ayri gosterir
+- UI `Tarla Blogu A`yi merkezde, `Tarla Blogu B`yi 4 kenardan secilebilir sekilde gosterir
 - Her parsel `field_block_id` tasir
+- `Tarla Blogu B` konum secimi UI'dan yapilabilir
+- Konum degisince `INTER_BLOCK` komsuluklari degisir
 - Komsuluk tipi API'de gorunur
 - Risk nedenleri blok ici ve bloklar arasi etkiyi ayirt eder
 - Demo, en az iki komsu tarla blogu ile calisir

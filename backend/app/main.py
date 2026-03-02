@@ -55,6 +55,10 @@ PARCELS = [
     {"parcel_id": "b_p7", "name": "P7", "field_block": {"field_block_id": "fb_b", "name": "Tarla Blogu B"}},
     {"parcel_id": "b_p8", "name": "P8", "field_block": {"field_block_id": "fb_b", "name": "Tarla Blogu B"}},
 ]
+PARCEL_BLOCK_MAP = {
+    parcel["parcel_id"]: parcel["field_block"]["field_block_id"]
+    for parcel in PARCELS
+}
 ADJACENCY: Dict[str, List[str]] = {
     "a_p1": ["a_p2", "a_p5"],
     "a_p2": ["a_p1", "a_p3", "a_p6"],
@@ -75,6 +79,10 @@ ADJACENCY: Dict[str, List[str]] = {
 }
 HIGH_INCOMPATIBLE = {("c_wheat", "c_sunflower"), ("c_sunflower", "c_wheat")}
 MEDIUM_INCOMPATIBLE = {("c_corn", "c_sunflower"), ("c_sunflower", "c_corn")}
+INTRA_HIGH_WEIGHT = 20
+INTER_HIGH_WEIGHT = 25
+INTRA_MEDIUM_WEIGHT = 12
+INTER_MEDIUM_WEIGHT = 15
 
 STATE: Dict[str, Any] = {
     "crop_plan": {
@@ -310,9 +318,17 @@ def risk_level_from_score(score: int) -> str:
     return "OK"
 
 
+def adjacency_type_for(parcel_id: str, neighbor_id: str) -> str:
+    if PARCEL_BLOCK_MAP.get(parcel_id) == PARCEL_BLOCK_MAP.get(neighbor_id):
+        return "INTRA_BLOCK"
+    return "INTER_BLOCK"
+
+
 def build_reasons(reason_codes: List[str], parcel_id: str) -> List[Dict[str, str]]:
     texts = {
         "NEIGHBOR_INCOMPATIBLE": "Komsu parsellerde uyumsuz urun kombinasyonu tespit edildi.",
+        "INTRA_BLOCK_CONFLICT": "Ayni tarla blogu icinde uyumsuz komsu urun tespit edildi.",
+        "INTER_BLOCK_BORDER_CONFLICT": "Komsu tarla sinirinda uyumsuz urun etkisi tespit edildi.",
         "HIGH_DIVERSITY_PRESSURE": "Koyde urun dagilimi dengesiz.",
         "SAME_CROP_CLUSTERING": "Ayni urun yogunlugu yuksek.",
         "UNKNOWN_DATA": "Karar icin bazi veriler eksik veya tanimsiz.",
@@ -320,7 +336,7 @@ def build_reasons(reason_codes: List[str], parcel_id: str) -> List[Dict[str, str
     result: List[Dict[str, str]] = []
     for code in reason_codes:
         text = texts.get(code, texts["UNKNOWN_DATA"])
-        if code == "NEIGHBOR_INCOMPATIBLE" and parcel_id == "a_p1":
+        if code in {"NEIGHBOR_INCOMPATIBLE", "INTRA_BLOCK_CONFLICT"} and parcel_id == "a_p1":
             text = "Komsu parselde aycicek tespit edildi."
         result.append({"code": code, "text": text})
     return result
@@ -328,7 +344,9 @@ def build_reasons(reason_codes: List[str], parcel_id: str) -> List[Dict[str, str
 
 def build_recommendations(parcel_id: str, reason_codes: List[str]) -> List[Dict[str, str]]:
     recs: List[Dict[str, str]] = []
-    if "NEIGHBOR_INCOMPATIBLE" in reason_codes:
+    if "INTER_BLOCK_BORDER_CONFLICT" in reason_codes:
+        recs.append({"type": "CROP_SUGGESTION", "text": "Sinir komsulugu icin arpa veya misir onerilir."})
+    elif "INTRA_BLOCK_CONFLICT" in reason_codes or "NEIGHBOR_INCOMPATIBLE" in reason_codes:
         recs.append({"type": "CROP_SUGGESTION", "text": "Arpa veya misir onerilir."})
     elif "SAME_CROP_CLUSTERING" in reason_codes:
         recs.append({"type": "CROP_SUGGESTION", "text": "Munavebe icin farkli urun planlayin."})
@@ -359,7 +377,7 @@ def compute_all_decisions() -> Dict[str, Dict[str, Any]]:
                 "reasons": [{"code": "UNKNOWN_DATA", "text": "Karar icin bazi veriler eksik veya tanimsiz."}],
                 "recommendations": [{"type": "WARNING", "text": "Once urun plani giriniz."}],
                 "confidence": None,
-                "model_version": "rules_v1",
+                "model_version": "rules_v2",
             }
             continue
         score = 0
@@ -367,17 +385,24 @@ def compute_all_decisions() -> Dict[str, Dict[str, Any]]:
         same_neighbors = 0
         for neighbor_id in ADJACENCY.get(parcel_id, []):
             neighbor_crop = crop_plan.get(neighbor_id)
+            adjacency_type = adjacency_type_for(parcel_id, neighbor_id)
             pair = (crop_id, neighbor_crop)
             if pair in HIGH_INCOMPATIBLE:
-                score += 30
+                score += INTER_HIGH_WEIGHT if adjacency_type == "INTER_BLOCK" else INTRA_HIGH_WEIGHT
+                reason_code = "INTER_BLOCK_BORDER_CONFLICT" if adjacency_type == "INTER_BLOCK" else "INTRA_BLOCK_CONFLICT"
+                if reason_code not in reason_codes:
+                    reason_codes.append(reason_code)
                 if "NEIGHBOR_INCOMPATIBLE" not in reason_codes:
                     reason_codes.append("NEIGHBOR_INCOMPATIBLE")
             elif pair in MEDIUM_INCOMPATIBLE:
-                score += 18
+                score += INTER_MEDIUM_WEIGHT if adjacency_type == "INTER_BLOCK" else INTRA_MEDIUM_WEIGHT
+                reason_code = "INTER_BLOCK_BORDER_CONFLICT" if adjacency_type == "INTER_BLOCK" else "INTRA_BLOCK_CONFLICT"
+                if reason_code not in reason_codes:
+                    reason_codes.append(reason_code)
                 if "NEIGHBOR_INCOMPATIBLE" not in reason_codes:
                     reason_codes.append("NEIGHBOR_INCOMPATIBLE")
             elif neighbor_crop == crop_id:
-                score += 13
+                score += 13 if adjacency_type == "INTRA_BLOCK" else 16
                 same_neighbors += 1
                 if "SAME_CROP_CLUSTERING" not in reason_codes:
                     reason_codes.append("SAME_CROP_CLUSTERING")
@@ -399,8 +424,8 @@ def compute_all_decisions() -> Dict[str, Dict[str, Any]]:
             "risk_level": risk_level_from_score(score),
             "reasons": build_reasons(reason_codes, parcel_id),
             "recommendations": build_recommendations(parcel_id, reason_codes),
-            "confidence": 0.72,
-            "model_version": "rules_v1",
+            "confidence": 0.76,
+            "model_version": "rules_v2",
         }
     return decisions
 

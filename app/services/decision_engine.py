@@ -173,3 +173,98 @@ def run_rules_v1(
         confidence=0.0,
         model_version="rules_v1",
     )
+
+
+def run_rules_v2(
+    parcel_crop_id: str,
+    intra_block_neighbor_crop_ids: list[str],
+    inter_block_neighbor_crop_ids: list[str],
+    village_unique_crops_count: int,
+) -> EngineOutput:
+    score = 0
+    reason_codes: list[str] = []
+    recommendations: list[dict] = []
+
+    if not parcel_crop_id:
+        return EngineOutput(
+            risk_score=0,
+            risk_level=RiskLevel.UNKNOWN.value,
+            reason_codes=[ReasonCode.UNKNOWN_DATA.value],
+            recommendations=[],
+            confidence=0.0,
+            model_version="rules_v2",
+        )
+
+    def add_reason(code: str) -> None:
+        if code not in reason_codes:
+            reason_codes.append(code)
+
+    def apply_neighbor_rules(neighbor_crop_ids: list[str], conflict_code: str, high_weight: int, medium_weight: int) -> None:
+        nonlocal score
+        for neighbor in neighbor_crop_ids:
+            if (parcel_crop_id == "c_wheat" and neighbor == "c_sunflower") or \
+               (parcel_crop_id == "c_sunflower" and neighbor == "c_wheat"):
+                score += high_weight
+                add_reason(conflict_code)
+            elif (parcel_crop_id == "c_corn" and neighbor == "c_sunflower") or \
+                 (parcel_crop_id == "c_sunflower" and neighbor == "c_corn"):
+                score += medium_weight
+                add_reason(conflict_code)
+
+    apply_neighbor_rules(
+        intra_block_neighbor_crop_ids,
+        ReasonCode.INTRA_BLOCK_CONFLICT.value,
+        high_weight=20,
+        medium_weight=12,
+    )
+    apply_neighbor_rules(
+        inter_block_neighbor_crop_ids,
+        ReasonCode.INTER_BLOCK_BORDER_CONFLICT.value,
+        high_weight=25,
+        medium_weight=15,
+    )
+
+    all_neighbor_crop_ids = intra_block_neighbor_crop_ids + inter_block_neighbor_crop_ids
+    if all_neighbor_crop_ids:
+        same_crop_count = all_neighbor_crop_ids.count(parcel_crop_id)
+        if (same_crop_count / len(all_neighbor_crop_ids)) > 0.5:
+            score += 15
+            add_reason(ReasonCode.SAME_CROP_CLUSTERING.value)
+
+    if village_unique_crops_count > 3:
+        score += 10
+        add_reason(ReasonCode.HIGH_DIVERSITY_PRESSURE.value)
+
+    if ReasonCode.INTER_BLOCK_BORDER_CONFLICT.value in reason_codes:
+        recommendations.append(
+            {
+                "type": RecommendationType.CROP_SUGGESTION.value,
+                "text": "Sinir komsulugunda uyumlu urun icin arpa veya misir onerilir.",
+            }
+        )
+    elif ReasonCode.INTRA_BLOCK_CONFLICT.value in reason_codes:
+        recommendations.append(
+            {
+                "type": RecommendationType.ACTION.value,
+                "text": "Ayni blok icindeki komsularla urun rotasyonu planlayin.",
+            }
+        )
+    else:
+        recommendations.append(
+            {
+                "type": RecommendationType.ACTION.value,
+                "text": "Mevcut dagilim kabul edilebilir, sezon takibini surdurun.",
+            }
+        )
+
+    score = int(clamp(score, 0, 100))
+    risk_level = risk_level_from_score(score)
+
+    return EngineOutput(
+        risk_score=score,
+        risk_level=risk_level.value if hasattr(risk_level, "value") else risk_level,
+        reason_codes=reason_codes,
+        recommendations=recommendations,
+        confidence=0.0,
+        model_version="rules_v2",
+    )

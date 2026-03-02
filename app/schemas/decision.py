@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Optional
 
 from pydantic import BaseModel
 
@@ -25,7 +26,7 @@ class ParcelDecisionResponse(BaseModel):
     risk_level: RiskLevel
     reasons: list[ReasonItem]
     recommendations: list[RecommendationItem]
-    confidence: float | None = None
+    confidence: Optional[float] = None
     model_version: str
 
 

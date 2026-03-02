@@ -1,4 +1,5 @@
 from datetime import date
+from typing import Optional
 
 from pydantic import BaseModel
 
@@ -15,9 +16,9 @@ class ParcelListItem(BaseModel):
     parcel_id: str
     name: str
     status: RiskLevel
-    crop: CropRef | None = None
-    risk_score: int | None = None
-    risk_level: RiskLevel | None = None
+    crop: Optional[CropRef] = None
+    risk_score: Optional[int] = None
+    risk_level: Optional[RiskLevel] = None
 
 
 class VillageParcelsResponse(BaseModel):
@@ -29,7 +30,7 @@ class VillageParcelsResponse(BaseModel):
 class UpdateCropPlanRequest(BaseModel):
     season: str
     crop_id: str
-    sowing_date: date | None = None
+    sowing_date: Optional[date] = None
 
 
 class UpdateCropPlanResponse(BaseModel):
@@ -41,7 +42,7 @@ class UpdateCropPlanResponse(BaseModel):
 class VillageListItem(BaseModel):
     village_id: str
     name: str
-    center: CenterPoint | None = None
+    center: Optional[CenterPoint] = None
 
 
 class VillageListResponse(BaseModel):
