@@ -14,7 +14,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from app.db.session import SessionLocal
 from app.models import CropCatalog, DecisionResult, Parcel, ParcelCropPlan, Village
 
-app = FastAPI(title="AgroNovaTech-AI Backend", version="v1-demo")
+app = FastAPI(title="AgroNovaTech-AI Backend", version="v2-demo")
 
 app.add_middleware(
     CORSMiddleware,
@@ -59,24 +59,35 @@ PARCEL_BLOCK_MAP = {
     parcel["parcel_id"]: parcel["field_block"]["field_block_id"]
     for parcel in PARCELS
 }
-ADJACENCY: Dict[str, List[str]] = {
+
+# Yön bazlı INTER_BLOCK komşuluk haritası
+# Tarla B'nin Tarla A'ya göre konumuna göre hangi parsel çiftleri sınır komşusu olur
+INTER_BLOCK_ADJACENCY_BY_POSITION: Dict[str, List[tuple]] = {
+    "right":  [("a_p4", "b_p1"), ("a_p8", "b_p5")],
+    "left":   [("a_p1", "b_p4"), ("a_p5", "b_p8")],
+    "top":    [("a_p1", "b_p5"), ("a_p2", "b_p6"), ("a_p3", "b_p7"), ("a_p4", "b_p8")],
+    "bottom": [("a_p5", "b_p1"), ("a_p6", "b_p2"), ("a_p7", "b_p3"), ("a_p8", "b_p4")],
+}
+
+ADJACENCY_BASE: Dict[str, List[str]] = {
     "a_p1": ["a_p2", "a_p5"],
     "a_p2": ["a_p1", "a_p3", "a_p6"],
     "a_p3": ["a_p2", "a_p4", "a_p7"],
-    "a_p4": ["a_p3", "a_p8", "b_p1"],
+    "a_p4": ["a_p3", "a_p8"],
     "a_p5": ["a_p1", "a_p6"],
     "a_p6": ["a_p2", "a_p5", "a_p7"],
     "a_p7": ["a_p3", "a_p6", "a_p8"],
-    "a_p8": ["a_p4", "a_p7", "b_p5"],
-    "b_p1": ["b_p2", "b_p5", "a_p4"],
+    "a_p8": ["a_p4", "a_p7"],
+    "b_p1": ["b_p2", "b_p5"],
     "b_p2": ["b_p1", "b_p3", "b_p6"],
     "b_p3": ["b_p2", "b_p4", "b_p7"],
     "b_p4": ["b_p3", "b_p8"],
-    "b_p5": ["b_p1", "b_p6", "a_p8"],
+    "b_p5": ["b_p1", "b_p6"],
     "b_p6": ["b_p2", "b_p5", "b_p7"],
     "b_p7": ["b_p3", "b_p6", "b_p8"],
     "b_p8": ["b_p4", "b_p7"],
 }
+
 HIGH_INCOMPATIBLE = {("c_wheat", "c_sunflower"), ("c_sunflower", "c_wheat")}
 MEDIUM_INCOMPATIBLE = {("c_corn", "c_sunflower"), ("c_sunflower", "c_corn")}
 INTRA_HIGH_WEIGHT = 20
@@ -105,8 +116,22 @@ STATE: Dict[str, Any] = {
     },
     "decisions": {},
     "last_job_id": None,
+    "field_layout_position": "right",  # top | right | bottom | left
 }
 JWT_SECRET = "agronovatech-demo-secret"
+
+
+def get_active_adjacency() -> Dict[str, List[str]]:
+    """Aktif yöne göre INTER_BLOCK komşuluklarını ADJACENCY_BASE'e ekler."""
+    adjacency = deepcopy(ADJACENCY_BASE)
+    position = STATE.get("field_layout_position", "right")
+    inter_pairs = INTER_BLOCK_ADJACENCY_BY_POSITION.get(position, [])
+    for a, b in inter_pairs:
+        if b not in adjacency[a]:
+            adjacency[a].append(b)
+        if a not in adjacency[b]:
+            adjacency[b].append(a)
+    return adjacency
 
 
 def db_session():
@@ -359,11 +384,12 @@ def build_recommendations(parcel_id: str, reason_codes: List[str]) -> List[Dict[
 
 def compute_all_decisions() -> Dict[str, Dict[str, Any]]:
     active_parcel_ids = {parcel["parcel_id"] for parcel in PARCELS}
-    crop_plan = {parcel_id: crop_id for parcel_id, crop_id in STATE["crop_plan"].items() if parcel_id in active_parcel_ids}
+    crop_plan = {pid: cid for pid, cid in STATE["crop_plan"].items() if pid in active_parcel_ids}
     crop_counts: Dict[str, int] = {}
     for crop_id in crop_plan.values():
         crop_counts[crop_id] = crop_counts.get(crop_id, 0) + 1
     unique_crops = len(set(crop_plan.values()))
+    adjacency = get_active_adjacency()  # Aktif yöne göre komşuluk
     decisions: Dict[str, Dict[str, Any]] = {}
     for parcel in PARCELS:
         parcel_id = parcel["parcel_id"]
@@ -383,26 +409,26 @@ def compute_all_decisions() -> Dict[str, Dict[str, Any]]:
         score = 0
         reason_codes: List[str] = []
         same_neighbors = 0
-        for neighbor_id in ADJACENCY.get(parcel_id, []):
+        for neighbor_id in adjacency.get(parcel_id, []):
             neighbor_crop = crop_plan.get(neighbor_id)
-            adjacency_type = adjacency_type_for(parcel_id, neighbor_id)
+            adj_type = adjacency_type_for(parcel_id, neighbor_id)
             pair = (crop_id, neighbor_crop)
             if pair in HIGH_INCOMPATIBLE:
-                score += INTER_HIGH_WEIGHT if adjacency_type == "INTER_BLOCK" else INTRA_HIGH_WEIGHT
-                reason_code = "INTER_BLOCK_BORDER_CONFLICT" if adjacency_type == "INTER_BLOCK" else "INTRA_BLOCK_CONFLICT"
-                if reason_code not in reason_codes:
-                    reason_codes.append(reason_code)
+                score += INTER_HIGH_WEIGHT if adj_type == "INTER_BLOCK" else INTRA_HIGH_WEIGHT
+                rc = "INTER_BLOCK_BORDER_CONFLICT" if adj_type == "INTER_BLOCK" else "INTRA_BLOCK_CONFLICT"
+                if rc not in reason_codes:
+                    reason_codes.append(rc)
                 if "NEIGHBOR_INCOMPATIBLE" not in reason_codes:
                     reason_codes.append("NEIGHBOR_INCOMPATIBLE")
             elif pair in MEDIUM_INCOMPATIBLE:
-                score += INTER_MEDIUM_WEIGHT if adjacency_type == "INTER_BLOCK" else INTRA_MEDIUM_WEIGHT
-                reason_code = "INTER_BLOCK_BORDER_CONFLICT" if adjacency_type == "INTER_BLOCK" else "INTRA_BLOCK_CONFLICT"
-                if reason_code not in reason_codes:
-                    reason_codes.append(reason_code)
+                score += INTER_MEDIUM_WEIGHT if adj_type == "INTER_BLOCK" else INTRA_MEDIUM_WEIGHT
+                rc = "INTER_BLOCK_BORDER_CONFLICT" if adj_type == "INTER_BLOCK" else "INTRA_BLOCK_CONFLICT"
+                if rc not in reason_codes:
+                    reason_codes.append(rc)
                 if "NEIGHBOR_INCOMPATIBLE" not in reason_codes:
                     reason_codes.append("NEIGHBOR_INCOMPATIBLE")
             elif neighbor_crop == crop_id:
-                score += 13 if adjacency_type == "INTRA_BLOCK" else 16
+                score += 13 if adj_type == "INTRA_BLOCK" else 16
                 same_neighbors += 1
                 if "SAME_CROP_CLUSTERING" not in reason_codes:
                     reason_codes.append("SAME_CROP_CLUSTERING")
@@ -435,14 +461,16 @@ def ensure_decisions() -> None:
         STATE["decisions"] = compute_all_decisions()
 
 
+# ─── ENDPOINTS ────────────────────────────────────────────────────────────────
+
 @app.get("/")
 def root():
-    return {"message": "AgroNovaTech-AI backend is running", "version": "v1-demo"}
+    return {"message": "AgroNovaTech-AI backend is running", "version": "v2-demo"}
 
 
 @app.get("/api/v1/health")
 def health_check():
-    return {"status": "ok", "service": "backend", "version": "v1"}
+    return {"status": "ok", "service": "backend", "version": "v2"}
 
 
 @app.post("/api/v1/auth/login")
@@ -500,7 +528,8 @@ def village_parcels(village_id: str, season: str = Query(...)):
 
 @app.put("/api/v1/parcels/{parcel_id}/crop-plan")
 def update_crop(parcel_id: str, payload: Dict[str, Any]):
-    if parcel_id not in ADJACENCY:
+    adjacency = get_active_adjacency()
+    if parcel_id not in adjacency:
         raise HTTPException(status_code=404, detail="Parcel not found")
     if payload.get("season") != SEASON:
         raise HTTPException(status_code=400, detail="Unsupported season")
@@ -533,14 +562,12 @@ def score(payload: Dict[str, Any]):
 
 @app.get("/api/v1/parcels/{parcel_id}/decision")
 def parcel_decision(parcel_id: str, season: str = Query(...)):
-    if parcel_id not in ADJACENCY:
+    adjacency = get_active_adjacency()
+    if parcel_id not in adjacency:
         raise HTTPException(status_code=404, detail="Parcel not found")
     if season != SEASON:
         raise HTTPException(status_code=400, detail="Unsupported season")
-    db_decision = read_latest_decision_from_db(parcel_id)
-    if db_decision is not None:
-        return db_decision
-    ensure_decisions()
+    STATE["decisions"] = compute_all_decisions()
     if parcel_id not in STATE["decisions"]:
         raise HTTPException(status_code=404, detail="Decision not found")
     return deepcopy(STATE["decisions"][parcel_id])
@@ -564,5 +591,37 @@ def village_summary(village_id: str, season: str = Query(...)):
         "shared_recommendations": [
             {"type": "VILLAGE_PLAN", "text": "Aycicek ve bugday komsulugunu azaltarak koy geneli risk dusurulebilir."}
         ],
-        "model_version": "rules_v1",
+        "model_version": "rules_v2",
+    }
+
+
+# ─── SPRINT-2: Field Layout Endpoint ──────────────────────────────────────────
+
+@app.get("/api/v2/villages/{village_id}/field-layout")
+def get_field_layout(village_id: str):
+    """Tarla B'nin aktif yönünü döner."""
+    if village_id != VILLAGE["village_id"]:
+        raise HTTPException(status_code=404, detail="Village not found")
+    return {
+        "village_id": village_id,
+        "field_layout_position": STATE["field_layout_position"],
+        "valid_positions": ["top", "right", "bottom", "left"],
+    }
+
+
+@app.put("/api/v2/villages/{village_id}/field-layout")
+def update_field_layout(village_id: str, payload: Dict[str, Any]):
+    """Tarla B'nin yönünü günceller ve komşuluğu yeniden hesaplar."""
+    if village_id != VILLAGE["village_id"]:
+        raise HTTPException(status_code=404, detail="Village not found")
+    position = payload.get("field_layout_position")
+    if position not in ["top", "right", "bottom", "left"]:
+        raise HTTPException(status_code=400, detail="Gecersiz pozisyon. top | right | bottom | left olmali.")
+    STATE["field_layout_position"] = position
+    STATE["decisions"] = {}  # Yön değişince kararları sıfırla
+    return {
+        "ok": True,
+        "village_id": village_id,
+        "field_layout_position": position,
+        "message": f"Tarla B yonu '{position}' olarak guncellendi. Komşuluk yeniden hesaplandı.",
     }
