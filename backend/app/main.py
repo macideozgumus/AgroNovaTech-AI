@@ -38,38 +38,70 @@ CROPS = [
 ]
 CROP_NAME_MAP = {item["crop_id"]: item["crop_name"] for item in CROPS}
 PARCELS = [
-    {"parcel_id": "p1", "name": "P1"},
-    {"parcel_id": "p2", "name": "P2"},
-    {"parcel_id": "p3", "name": "P3"},
-    {"parcel_id": "p4", "name": "P4"},
-    {"parcel_id": "p5", "name": "P5"},
-    {"parcel_id": "p6", "name": "P6"},
-    {"parcel_id": "p7", "name": "P7"},
-    {"parcel_id": "p8", "name": "P8"},
+    {"parcel_id": "a_p1", "name": "P1", "field_block": {"field_block_id": "fb_a", "name": "Tarla Blogu A"}},
+    {"parcel_id": "a_p2", "name": "P2", "field_block": {"field_block_id": "fb_a", "name": "Tarla Blogu A"}},
+    {"parcel_id": "a_p3", "name": "P3", "field_block": {"field_block_id": "fb_a", "name": "Tarla Blogu A"}},
+    {"parcel_id": "a_p4", "name": "P4", "field_block": {"field_block_id": "fb_a", "name": "Tarla Blogu A"}},
+    {"parcel_id": "a_p5", "name": "P5", "field_block": {"field_block_id": "fb_a", "name": "Tarla Blogu A"}},
+    {"parcel_id": "a_p6", "name": "P6", "field_block": {"field_block_id": "fb_a", "name": "Tarla Blogu A"}},
+    {"parcel_id": "a_p7", "name": "P7", "field_block": {"field_block_id": "fb_a", "name": "Tarla Blogu A"}},
+    {"parcel_id": "a_p8", "name": "P8", "field_block": {"field_block_id": "fb_a", "name": "Tarla Blogu A"}},
+    {"parcel_id": "b_p1", "name": "P1", "field_block": {"field_block_id": "fb_b", "name": "Tarla Blogu B"}},
+    {"parcel_id": "b_p2", "name": "P2", "field_block": {"field_block_id": "fb_b", "name": "Tarla Blogu B"}},
+    {"parcel_id": "b_p3", "name": "P3", "field_block": {"field_block_id": "fb_b", "name": "Tarla Blogu B"}},
+    {"parcel_id": "b_p4", "name": "P4", "field_block": {"field_block_id": "fb_b", "name": "Tarla Blogu B"}},
+    {"parcel_id": "b_p5", "name": "P5", "field_block": {"field_block_id": "fb_b", "name": "Tarla Blogu B"}},
+    {"parcel_id": "b_p6", "name": "P6", "field_block": {"field_block_id": "fb_b", "name": "Tarla Blogu B"}},
+    {"parcel_id": "b_p7", "name": "P7", "field_block": {"field_block_id": "fb_b", "name": "Tarla Blogu B"}},
+    {"parcel_id": "b_p8", "name": "P8", "field_block": {"field_block_id": "fb_b", "name": "Tarla Blogu B"}},
 ]
+PARCEL_BLOCK_MAP = {
+    parcel["parcel_id"]: parcel["field_block"]["field_block_id"]
+    for parcel in PARCELS
+}
 ADJACENCY: Dict[str, List[str]] = {
-    "p1": ["p2", "p4"],
-    "p2": ["p1", "p3", "p5"],
-    "p3": ["p2", "p6"],
-    "p4": ["p1", "p5", "p7"],
-    "p5": ["p2", "p4", "p6", "p8"],
-    "p6": ["p3", "p5"],
-    "p7": ["p4", "p8"],
-    "p8": ["p5", "p7"],
+    "a_p1": ["a_p2", "a_p5"],
+    "a_p2": ["a_p1", "a_p3", "a_p6"],
+    "a_p3": ["a_p2", "a_p4", "a_p7"],
+    "a_p4": ["a_p3", "a_p8", "b_p1"],
+    "a_p5": ["a_p1", "a_p6"],
+    "a_p6": ["a_p2", "a_p5", "a_p7"],
+    "a_p7": ["a_p3", "a_p6", "a_p8"],
+    "a_p8": ["a_p4", "a_p7", "b_p5"],
+    "b_p1": ["b_p2", "b_p5", "a_p4"],
+    "b_p2": ["b_p1", "b_p3", "b_p6"],
+    "b_p3": ["b_p2", "b_p4", "b_p7"],
+    "b_p4": ["b_p3", "b_p8"],
+    "b_p5": ["b_p1", "b_p6", "a_p8"],
+    "b_p6": ["b_p2", "b_p5", "b_p7"],
+    "b_p7": ["b_p3", "b_p6", "b_p8"],
+    "b_p8": ["b_p4", "b_p7"],
 }
 HIGH_INCOMPATIBLE = {("c_wheat", "c_sunflower"), ("c_sunflower", "c_wheat")}
 MEDIUM_INCOMPATIBLE = {("c_corn", "c_sunflower"), ("c_sunflower", "c_corn")}
+INTRA_HIGH_WEIGHT = 20
+INTER_HIGH_WEIGHT = 25
+INTRA_MEDIUM_WEIGHT = 12
+INTER_MEDIUM_WEIGHT = 15
 
 STATE: Dict[str, Any] = {
     "crop_plan": {
-        "p1": "c_wheat",
-        "p2": "c_sunflower",
-        "p3": "c_wheat",
-        "p4": "c_wheat",
-        "p5": "c_sunflower",
-        "p6": "c_corn",
-        "p7": "c_barley",
-        "p8": "c_wheat",
+        "a_p1": "c_wheat",
+        "a_p2": "c_sunflower",
+        "a_p3": "c_wheat",
+        "a_p4": "c_wheat",
+        "a_p5": "c_wheat",
+        "a_p6": "c_sunflower",
+        "a_p7": "c_corn",
+        "a_p8": "c_barley",
+        "b_p1": "c_wheat",
+        "b_p2": "c_barley",
+        "b_p3": "c_wheat",
+        "b_p4": "c_corn",
+        "b_p5": "c_wheat",
+        "b_p6": "c_sunflower",
+        "b_p7": "c_wheat",
+        "b_p8": "c_wheat",
     },
     "decisions": {},
     "last_job_id": None,
@@ -133,14 +165,13 @@ def ensure_core_seed() -> None:
     if db is None:
         return
     try:
-        if db.get(Village, VILLAGE["village_id"]) is not None:
-            return
-        db.add(Village(
-            id=VILLAGE["village_id"],
-            name=VILLAGE["name"],
-            center_lat=VILLAGE["center"]["lat"],
-            center_lng=VILLAGE["center"]["lng"],
-        ))
+        if db.get(Village, VILLAGE["village_id"]) is None:
+            db.add(Village(
+                id=VILLAGE["village_id"],
+                name=VILLAGE["name"],
+                center_lat=VILLAGE["center"]["lat"],
+                center_lng=VILLAGE["center"]["lng"],
+            ))
         for crop in CROPS:
             if db.get(CropCatalog, crop["crop_id"]) is None:
                 db.add(CropCatalog(id=crop["crop_id"], crop_name=crop["crop_name"], group_name=None, is_active=True))
@@ -287,9 +318,17 @@ def risk_level_from_score(score: int) -> str:
     return "OK"
 
 
+def adjacency_type_for(parcel_id: str, neighbor_id: str) -> str:
+    if PARCEL_BLOCK_MAP.get(parcel_id) == PARCEL_BLOCK_MAP.get(neighbor_id):
+        return "INTRA_BLOCK"
+    return "INTER_BLOCK"
+
+
 def build_reasons(reason_codes: List[str], parcel_id: str) -> List[Dict[str, str]]:
     texts = {
         "NEIGHBOR_INCOMPATIBLE": "Komsu parsellerde uyumsuz urun kombinasyonu tespit edildi.",
+        "INTRA_BLOCK_CONFLICT": "Ayni tarla blogu icinde uyumsuz komsu urun tespit edildi.",
+        "INTER_BLOCK_BORDER_CONFLICT": "Komsu tarla sinirinda uyumsuz urun etkisi tespit edildi.",
         "HIGH_DIVERSITY_PRESSURE": "Koyde urun dagilimi dengesiz.",
         "SAME_CROP_CLUSTERING": "Ayni urun yogunlugu yuksek.",
         "UNKNOWN_DATA": "Karar icin bazi veriler eksik veya tanimsiz.",
@@ -297,7 +336,7 @@ def build_reasons(reason_codes: List[str], parcel_id: str) -> List[Dict[str, str
     result: List[Dict[str, str]] = []
     for code in reason_codes:
         text = texts.get(code, texts["UNKNOWN_DATA"])
-        if code == "NEIGHBOR_INCOMPATIBLE" and parcel_id == "p1":
+        if code in {"NEIGHBOR_INCOMPATIBLE", "INTRA_BLOCK_CONFLICT"} and parcel_id == "a_p1":
             text = "Komsu parselde aycicek tespit edildi."
         result.append({"code": code, "text": text})
     return result
@@ -305,19 +344,22 @@ def build_reasons(reason_codes: List[str], parcel_id: str) -> List[Dict[str, str
 
 def build_recommendations(parcel_id: str, reason_codes: List[str]) -> List[Dict[str, str]]:
     recs: List[Dict[str, str]] = []
-    if "NEIGHBOR_INCOMPATIBLE" in reason_codes:
+    if "INTER_BLOCK_BORDER_CONFLICT" in reason_codes:
+        recs.append({"type": "CROP_SUGGESTION", "text": "Sinir komsulugu icin arpa veya misir onerilir."})
+    elif "INTRA_BLOCK_CONFLICT" in reason_codes or "NEIGHBOR_INCOMPATIBLE" in reason_codes:
         recs.append({"type": "CROP_SUGGESTION", "text": "Arpa veya misir onerilir."})
     elif "SAME_CROP_CLUSTERING" in reason_codes:
         recs.append({"type": "CROP_SUGGESTION", "text": "Munavebe icin farkli urun planlayin."})
     else:
         recs.append({"type": "ACTION", "text": "Mevcut plan uygun gorunuyor, sezon takibi yapin."})
-    if parcel_id == "p1":
+    if parcel_id == "a_p1":
         recs.append({"type": "ACTION", "text": "Ekim tarihini 7-10 gun kaydirmak risk azaltabilir."})
     return recs
 
 
 def compute_all_decisions() -> Dict[str, Dict[str, Any]]:
-    crop_plan = STATE["crop_plan"]
+    active_parcel_ids = {parcel["parcel_id"] for parcel in PARCELS}
+    crop_plan = {parcel_id: crop_id for parcel_id, crop_id in STATE["crop_plan"].items() if parcel_id in active_parcel_ids}
     crop_counts: Dict[str, int] = {}
     for crop_id in crop_plan.values():
         crop_counts[crop_id] = crop_counts.get(crop_id, 0) + 1
@@ -335,7 +377,7 @@ def compute_all_decisions() -> Dict[str, Dict[str, Any]]:
                 "reasons": [{"code": "UNKNOWN_DATA", "text": "Karar icin bazi veriler eksik veya tanimsiz."}],
                 "recommendations": [{"type": "WARNING", "text": "Once urun plani giriniz."}],
                 "confidence": None,
-                "model_version": "rules_v1",
+                "model_version": "rules_v2",
             }
             continue
         score = 0
@@ -343,17 +385,24 @@ def compute_all_decisions() -> Dict[str, Dict[str, Any]]:
         same_neighbors = 0
         for neighbor_id in ADJACENCY.get(parcel_id, []):
             neighbor_crop = crop_plan.get(neighbor_id)
+            adjacency_type = adjacency_type_for(parcel_id, neighbor_id)
             pair = (crop_id, neighbor_crop)
             if pair in HIGH_INCOMPATIBLE:
-                score += 30
+                score += INTER_HIGH_WEIGHT if adjacency_type == "INTER_BLOCK" else INTRA_HIGH_WEIGHT
+                reason_code = "INTER_BLOCK_BORDER_CONFLICT" if adjacency_type == "INTER_BLOCK" else "INTRA_BLOCK_CONFLICT"
+                if reason_code not in reason_codes:
+                    reason_codes.append(reason_code)
                 if "NEIGHBOR_INCOMPATIBLE" not in reason_codes:
                     reason_codes.append("NEIGHBOR_INCOMPATIBLE")
             elif pair in MEDIUM_INCOMPATIBLE:
-                score += 18
+                score += INTER_MEDIUM_WEIGHT if adjacency_type == "INTER_BLOCK" else INTRA_MEDIUM_WEIGHT
+                reason_code = "INTER_BLOCK_BORDER_CONFLICT" if adjacency_type == "INTER_BLOCK" else "INTRA_BLOCK_CONFLICT"
+                if reason_code not in reason_codes:
+                    reason_codes.append(reason_code)
                 if "NEIGHBOR_INCOMPATIBLE" not in reason_codes:
                     reason_codes.append("NEIGHBOR_INCOMPATIBLE")
             elif neighbor_crop == crop_id:
-                score += 13
+                score += 13 if adjacency_type == "INTRA_BLOCK" else 16
                 same_neighbors += 1
                 if "SAME_CROP_CLUSTERING" not in reason_codes:
                     reason_codes.append("SAME_CROP_CLUSTERING")
@@ -375,8 +424,8 @@ def compute_all_decisions() -> Dict[str, Dict[str, Any]]:
             "risk_level": risk_level_from_score(score),
             "reasons": build_reasons(reason_codes, parcel_id),
             "recommendations": build_recommendations(parcel_id, reason_codes),
-            "confidence": 0.72,
-            "model_version": "rules_v1",
+            "confidence": 0.76,
+            "model_version": "rules_v2",
         }
     return decisions
 
@@ -444,6 +493,7 @@ def village_parcels(village_id: str, season: str = Query(...)):
             "crop": {"crop_id": crop_id, "crop_name": CROP_NAME_MAP.get(crop_id, "")} if crop_id else None,
             "risk_score": decision["risk_score"] if decision else None,
             "risk_level": decision["risk_level"] if decision else None,
+            "field_block": parcel.get("field_block"),
         })
     return {"village_id": village_id, "season": season, "parcels": items}
 

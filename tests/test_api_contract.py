@@ -31,7 +31,7 @@ class TestApiContract(unittest.TestCase):
         self.assertGreater(len(payload["parcels"]), 0)
 
         first = payload["parcels"][0]
-        for field in ("parcel_id", "name", "status", "crop", "risk_score", "risk_level"):
+        for field in ("parcel_id", "name", "status", "crop", "risk_score", "risk_level", "field_block"):
             self.assertIn(field, first)
 
     def test_parcel_decision_contract(self) -> None:
@@ -39,7 +39,7 @@ class TestApiContract(unittest.TestCase):
             {"village_id": "v1", "season": "2026_Spring"},
         )
 
-        payload = backend_main.parcel_decision("p1", "2026_Spring")
+        payload = backend_main.parcel_decision("a_p1", "2026_Spring")
 
         for field in (
             "parcel_id",

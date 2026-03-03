@@ -13,11 +13,13 @@ class Parcel(Base):
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
     village_id: Mapped[str] = mapped_column(ForeignKey("village.id"), nullable=False, index=True)
+    field_block_id: Mapped[Optional[str]] = mapped_column(ForeignKey("field_block.id"), nullable=True, index=True)
     name: Mapped[str] = mapped_column(String(32), nullable=False)
     status: Mapped[str] = mapped_column(String(16), nullable=False, default="UNKNOWN")
     geometry_json: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     created_at: Mapped[object] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     village = relationship("Village", back_populates="parcels")
+    field_block = relationship("FieldBlock", back_populates="parcels")
     crop_plans = relationship("ParcelCropPlan", back_populates="parcel")
     decisions = relationship("DecisionResult", back_populates="parcel")

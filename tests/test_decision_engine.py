@@ -1,5 +1,5 @@
 import unittest
-from app.services.decision_engine import run_rules_v1
+from app.services.decision_engine import run_rules_v1, run_rules_v2
 from app.core.enums import RiskLevel
 
 class TestDecisionEngine(unittest.TestCase):
@@ -71,6 +71,34 @@ class TestDecisionEngine(unittest.TestCase):
         self.assertEqual(output.risk_score, 0)
         self.assertEqual(output.risk_level, RiskLevel.UNKNOWN.value)
         self.assertIn("UNKNOWN_DATA", output.reason_codes)
+
+    def test_run_rules_v2_inter_block_conflict_is_heavier(self):
+        output = run_rules_v2(
+            parcel_crop_id="c_wheat",
+            intra_block_neighbor_crop_ids=["c_sunflower"],
+            inter_block_neighbor_crop_ids=["c_sunflower"],
+            village_unique_crops_count=2,
+        )
+        self.assertEqual(output.risk_score, 45)
+        self.assertEqual(output.risk_level, RiskLevel.RISKY.value)
+        self.assertIn("INTRA_BLOCK_CONFLICT", output.reason_codes)
+        self.assertIn("INTER_BLOCK_BORDER_CONFLICT", output.reason_codes)
+
+    def test_run_rules_v2_same_input_changes_with_border_position(self):
+        no_border_output = run_rules_v2(
+            parcel_crop_id="c_wheat",
+            intra_block_neighbor_crop_ids=["c_wheat", "c_wheat"],
+            inter_block_neighbor_crop_ids=[],
+            village_unique_crops_count=2,
+        )
+        border_output = run_rules_v2(
+            parcel_crop_id="c_wheat",
+            intra_block_neighbor_crop_ids=["c_wheat", "c_wheat"],
+            inter_block_neighbor_crop_ids=["c_sunflower"],
+            village_unique_crops_count=2,
+        )
+        self.assertGreater(border_output.risk_score, no_border_output.risk_score)
+        self.assertIn("INTER_BLOCK_BORDER_CONFLICT", border_output.reason_codes)
 
 if __name__ == '__main__':
     unittest.main()
