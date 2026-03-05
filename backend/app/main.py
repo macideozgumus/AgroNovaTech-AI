@@ -625,3 +625,32 @@ def update_field_layout(village_id: str, payload: Dict[str, Any]):
         "field_layout_position": position,
         "message": f"Tarla B yonu '{position}' olarak guncellendi. Komşuluk yeniden hesaplandı.",
     }
+@app.get("/api/v2/parcels/{parcel_id}/neighbors")
+def parcel_neighbors_v2(parcel_id: str, season: str = Query(...)):
+    """Secili parselin aktif yerlesime gore intra/inter blok komsularini dondurur."""
+    adjacency = get_active_adjacency()
+    if parcel_id not in adjacency:
+        raise HTTPException(status_code=404, detail="Parcel not found")
+    if season != SEASON:
+        raise HTTPException(status_code=400, detail="Unsupported season")
+
+    intra: List[Dict[str, str]] = []
+    inter: List[Dict[str, str]] = []
+
+    for neighbor_id in adjacency.get(parcel_id, []):
+        adj_type = adjacency_type_for(parcel_id, neighbor_id)
+        item = {"parcel_id": neighbor_id, "adjacency_type": adj_type}
+        if adj_type == "INTRA_BLOCK":
+            intra.append(item)
+        else:
+            inter.append(item)
+
+    return {
+        "parcel_id": parcel_id,
+        "season": season,
+        "layout_position": STATE["field_layout_position"],
+        "neighbors": {
+            "intra_block": intra,
+            "inter_block": inter,
+        },
+    }
