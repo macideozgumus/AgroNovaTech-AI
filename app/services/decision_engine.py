@@ -180,6 +180,8 @@ def run_rules_v2(
     intra_block_neighbor_crop_ids: list[str],
     inter_block_neighbor_crop_ids: list[str],
     village_unique_crops_count: int,
+    border_margin: float = 1.0,
+    wind_factor: float = 1.0,
 ) -> EngineOutput:
     score = 0
     reason_codes: list[str] = []
@@ -199,61 +201,69 @@ def run_rules_v2(
         if code not in reason_codes:
             reason_codes.append(code)
 
-    def apply_neighbor_rules(neighbor_crop_ids: list[str], conflict_code: str, high_weight: int, medium_weight: int) -> None:
-        nonlocal score
-        for neighbor in neighbor_crop_ids:
-            if (parcel_crop_id == "c_wheat" and neighbor == "c_sunflower") or \
-               (parcel_crop_id == "c_sunflower" and neighbor == "c_wheat"):
-                score += high_weight
-                add_reason(conflict_code)
-            elif (parcel_crop_id == "c_corn" and neighbor == "c_sunflower") or \
-                 (parcel_crop_id == "c_sunflower" and neighbor == "c_corn"):
-                score += medium_weight
-                add_reason(conflict_code)
+    def get_conflict_points(c1: str, c2: str, high: float, medium: float) -> float:
+        if (c1, c2) in [("c_wheat", "c_sunflower"), ("c_sunflower", "c_wheat")]:
+            return high
+        if (c1, c2) in [("c_corn", "c_sunflower"), ("c_sunflower", "c_corn")]:
+            return medium
+        return 0
 
-    apply_neighbor_rules(
-        intra_block_neighbor_crop_ids,
-        ReasonCode.INTRA_BLOCK_CONFLICT.value,
-        high_weight=20,
-        medium_weight=12,
-    )
-    apply_neighbor_rules(
-        inter_block_neighbor_crop_ids,
-        ReasonCode.INTER_BLOCK_BORDER_CONFLICT.value,
-        high_weight=25,
-        medium_weight=15,
-    )
+    # R_intra: Intra-block risk
+    intra_score = 0.0
+    for neighbor in intra_block_neighbor_crop_ids:
+        pts = get_conflict_points(parcel_crop_id, neighbor, high=20.0, medium=12.0)
+        intra_score += pts
+    
+    if intra_score > 0:
+        score += int(intra_score)
+        add_reason("INTRA_BLOCK_CONFLICT")
 
+    # R_inter: Border / direction risk
+    inter_score = 0.0
+    for neighbor in inter_block_neighbor_crop_ids:
+        pts = get_conflict_points(parcel_crop_id, neighbor, high=25.0, medium=15.0)
+        inter_score += pts
+        
+    if inter_score > 0:
+        # Include border_margin and wind_factor as requested
+        adjusted_inter_score = inter_score * border_margin * wind_factor
+        score += int(adjusted_inter_score)
+        add_reason("INTER_BLOCK_BORDER_CONFLICT")
+
+    # R_density: Crop density risk
     all_neighbor_crop_ids = intra_block_neighbor_crop_ids + inter_block_neighbor_crop_ids
     if all_neighbor_crop_ids:
         same_crop_count = all_neighbor_crop_ids.count(parcel_crop_id)
         if (same_crop_count / len(all_neighbor_crop_ids)) > 0.5:
             score += 15
-            add_reason(ReasonCode.SAME_CROP_CLUSTERING.value)
+            add_reason("HIGH_DENSITY_CLUSTERING")
 
+    # R_village: Village-wide diversity pressure
     if village_unique_crops_count > 3:
         score += 10
-        add_reason(ReasonCode.HIGH_DIVERSITY_PRESSURE.value)
+        add_reason("VILLAGE_DISTRIBUTION_PRESSURE")
 
-    if ReasonCode.INTER_BLOCK_BORDER_CONFLICT.value in reason_codes:
+    # Recommendations
+    if "INTER_BLOCK_BORDER_CONFLICT" in reason_codes:
         recommendations.append(
             {
                 "type": RecommendationType.CROP_SUGGESTION.value,
-                "text": "Sinir komsulugunda uyumlu urun icin arpa veya misir onerilir.",
+                "text": "Sınır komşuluğunda uyumlu ürün için arpa veya mısır önerilir.",
             }
         )
-    elif ReasonCode.INTRA_BLOCK_CONFLICT.value in reason_codes:
+    if "INTRA_BLOCK_CONFLICT" in reason_codes:
         recommendations.append(
             {
                 "type": RecommendationType.ACTION.value,
-                "text": "Ayni blok icindeki komsularla urun rotasyonu planlayin.",
+                "text": "Aynı blok içindeki komşularla ürün rotasyonu planlayın.",
             }
         )
-    else:
+        
+    if not recommendations:
         recommendations.append(
             {
                 "type": RecommendationType.ACTION.value,
-                "text": "Mevcut dagilim kabul edilebilir, sezon takibini surdurun.",
+                "text": "Mevcut dağılım kabul edilebilir, sezon takibini sürdürün.",
             }
         )
 

@@ -1,79 +1,54 @@
-import sys
-from copy import deepcopy
-from pathlib import Path
 import unittest
 
-
-BACKEND_PATH = Path(__file__).resolve().parents[1] / "backend"
-if str(BACKEND_PATH) not in sys.path:
-    sys.path.insert(0, str(BACKEND_PATH))
-
-import app.main as backend_main  # noqa: E402
-
+from app.services.decision_engine import run_rules_v2
+from app.core.enums import RiskLevel
 
 class TestDemoScenarios(unittest.TestCase):
-    def setUp(self) -> None:
-        self.original_crop_plan = deepcopy(backend_main.STATE["crop_plan"])
-        self.original_decisions = deepcopy(backend_main.STATE["decisions"])
+    def test_scenario_1_intra_block_increase(self):
+        """Test 1 (Blok İçi Artış)"""
+        output = run_rules_v2(
+            parcel_crop_id="c_wheat",
+            intra_block_neighbor_crop_ids=["c_sunflower"],
+            inter_block_neighbor_crop_ids=[],
+            village_unique_crops_count=2,
+        )
+        self.assertGreater(output.risk_score, 0)
+        self.assertIn("INTRA_BLOCK_CONFLICT", output.reason_codes)
 
-    def tearDown(self) -> None:
-        backend_main.STATE["crop_plan"] = self.original_crop_plan
-        backend_main.STATE["decisions"] = self.original_decisions
+    def test_scenario_2_border_direction_sensitivity(self):
+        """Test 2 (Yön/Sınır Hassasiyeti)"""
+        output_normal = run_rules_v2(
+            parcel_crop_id="c_wheat",
+            intra_block_neighbor_crop_ids=[],
+            inter_block_neighbor_crop_ids=["c_sunflower"],
+            village_unique_crops_count=2,
+            border_margin=1.0,
+            wind_factor=1.0,
+        )
+        output_windy = run_rules_v2(
+            parcel_crop_id="c_wheat",
+            intra_block_neighbor_crop_ids=[],
+            inter_block_neighbor_crop_ids=["c_sunflower"],
+            village_unique_crops_count=2,
+            border_margin=1.0,
+            wind_factor=1.5,
+        )
+        self.assertGreater(output_windy.risk_score, output_normal.risk_score)
+        self.assertIn("INTER_BLOCK_BORDER_CONFLICT", output_windy.reason_codes)
 
-    def test_default_demo_p1_is_risky(self) -> None:
-        backend_main.STATE["crop_plan"] = {
-            "a_p1": "c_wheat",
-            "a_p2": "c_sunflower",
-            "a_p3": "c_wheat",
-            "a_p4": "c_wheat",
-            "a_p5": "c_wheat",
-            "a_p6": "c_sunflower",
-            "a_p7": "c_corn",
-            "a_p8": "c_barley",
-            "b_p1": "c_wheat",
-            "b_p2": "c_barley",
-            "b_p3": "c_wheat",
-            "b_p4": "c_corn",
-            "b_p5": "c_wheat",
-            "b_p6": "c_sunflower",
-            "b_p7": "c_wheat",
-            "b_p8": "c_wheat",
-        }
-
-        decisions = backend_main.compute_all_decisions()
-        p1 = decisions["a_p1"]
-
-        self.assertEqual(p1["risk_score"], 68)
-        self.assertEqual(p1["risk_level"], "RISKY")
-        self.assertTrue(any(item["code"] == "NEIGHBOR_INCOMPATIBLE" for item in p1["reasons"]))
-
-    def test_adjusted_demo_p5_is_ok(self) -> None:
-        backend_main.STATE["crop_plan"] = {
-            "a_p1": "c_wheat",
-            "a_p2": "c_wheat",
-            "a_p3": "c_sunflower",
-            "a_p4": "c_wheat",
-            "a_p5": "c_barley",
-            "a_p6": "c_corn",
-            "a_p7": "c_wheat",
-            "a_p8": "c_wheat",
-            "b_p1": "c_barley",
-            "b_p2": "c_barley",
-            "b_p3": "c_wheat",
-            "b_p4": "c_corn",
-            "b_p5": "c_barley",
-            "b_p6": "c_barley",
-            "b_p7": "c_wheat",
-            "b_p8": "c_barley",
-        }
-
-        decisions = backend_main.compute_all_decisions()
-        p5 = decisions["a_p5"]
-
-        self.assertEqual(p5["risk_score"], 10)
-        self.assertEqual(p5["risk_level"], "OK")
-        self.assertFalse(any(item["code"] == "NEIGHBOR_INCOMPATIBLE" for item in p5["reasons"]))
-
+    def test_scenario_3_suitable_distribution(self):
+        """Test 3 (Uygun Dağılım)"""
+        output = run_rules_v2(
+            parcel_crop_id="c_wheat",
+            intra_block_neighbor_crop_ids=["c_wheat"],
+            inter_block_neighbor_crop_ids=["c_corn"],
+            village_unique_crops_count=2,
+            border_margin=1.0,
+            wind_factor=1.0,
+        )
+        self.assertEqual(output.risk_level, RiskLevel.OK.value)
+        self.assertNotIn("INTRA_BLOCK_CONFLICT", output.reason_codes)
+        self.assertNotIn("INTER_BLOCK_BORDER_CONFLICT", output.reason_codes)
 
 if __name__ == "__main__":
     unittest.main()

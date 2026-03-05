@@ -100,5 +100,16 @@ class TestDecisionEngine(unittest.TestCase):
         self.assertGreater(border_output.risk_score, no_border_output.risk_score)
         self.assertIn("INTER_BLOCK_BORDER_CONFLICT", border_output.reason_codes)
 
+    def test_run_rules_v2_density_and_village(self):
+        output = run_rules_v2(
+            parcel_crop_id="c_wheat",
+            intra_block_neighbor_crop_ids=["c_wheat", "c_wheat", "c_wheat"],
+            inter_block_neighbor_crop_ids=[],
+            village_unique_crops_count=5, # > 3
+        )
+        self.assertIn("HIGH_DENSITY_CLUSTERING", output.reason_codes)
+        self.assertIn("VILLAGE_DISTRIBUTION_PRESSURE", output.reason_codes)
+        self.assertGreater(output.risk_score, 0)
+
 if __name__ == '__main__':
     unittest.main()
