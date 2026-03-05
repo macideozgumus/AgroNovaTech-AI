@@ -12,6 +12,7 @@ from sqlalchemy import desc
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.db.session import SessionLocal
+from app.decision_engine.rules_v2 import run_rules_v2
 from app.models import CropCatalog, DecisionResult, Parcel, ParcelCropPlan, Village
 
 app = FastAPI(title="AgroNovaTech-AI Backend", version="v2-demo")
@@ -394,64 +395,34 @@ def compute_all_decisions() -> Dict[str, Dict[str, Any]]:
     for parcel in PARCELS:
         parcel_id = parcel["parcel_id"]
         crop_id = crop_plan.get(parcel_id)
-        if not crop_id:
-            decisions[parcel_id] = {
-                "parcel_id": parcel_id,
-                "season": SEASON,
-                "risk_score": 0,
-                "risk_level": "UNKNOWN",
-                "reasons": [{"code": "UNKNOWN_DATA", "text": "Karar icin bazi veriler eksik veya tanimsiz."}],
-                "recommendations": [{"type": "WARNING", "text": "Once urun plani giriniz."}],
-                "confidence": None,
-                "model_version": "rules_v2",
-            }
-            continue
-        score = 0
-        reason_codes: List[str] = []
-        same_neighbors = 0
+        intra_neighbor_crops: List[str] = []
+        inter_neighbor_crops: List[str] = []
         for neighbor_id in adjacency.get(parcel_id, []):
             neighbor_crop = crop_plan.get(neighbor_id)
-            adj_type = adjacency_type_for(parcel_id, neighbor_id)
-            pair = (crop_id, neighbor_crop)
-            if pair in HIGH_INCOMPATIBLE:
-                score += INTER_HIGH_WEIGHT if adj_type == "INTER_BLOCK" else INTRA_HIGH_WEIGHT
-                rc = "INTER_BLOCK_BORDER_CONFLICT" if adj_type == "INTER_BLOCK" else "INTRA_BLOCK_CONFLICT"
-                if rc not in reason_codes:
-                    reason_codes.append(rc)
-                if "NEIGHBOR_INCOMPATIBLE" not in reason_codes:
-                    reason_codes.append("NEIGHBOR_INCOMPATIBLE")
-            elif pair in MEDIUM_INCOMPATIBLE:
-                score += INTER_MEDIUM_WEIGHT if adj_type == "INTER_BLOCK" else INTRA_MEDIUM_WEIGHT
-                rc = "INTER_BLOCK_BORDER_CONFLICT" if adj_type == "INTER_BLOCK" else "INTRA_BLOCK_CONFLICT"
-                if rc not in reason_codes:
-                    reason_codes.append(rc)
-                if "NEIGHBOR_INCOMPATIBLE" not in reason_codes:
-                    reason_codes.append("NEIGHBOR_INCOMPATIBLE")
-            elif neighbor_crop == crop_id:
-                score += 13 if adj_type == "INTRA_BLOCK" else 16
-                same_neighbors += 1
-                if "SAME_CROP_CLUSTERING" not in reason_codes:
-                    reason_codes.append("SAME_CROP_CLUSTERING")
-        if crop_counts.get(crop_id, 0) / len(PARCELS) >= 0.5:
-            if "SAME_CROP_CLUSTERING" not in reason_codes:
-                reason_codes.append("SAME_CROP_CLUSTERING")
-            score += 15
-        if unique_crops > 3:
-            if "HIGH_DIVERSITY_PRESSURE" not in reason_codes:
-                reason_codes.append("HIGH_DIVERSITY_PRESSURE")
-            score += 10
-        if same_neighbors >= 2:
-            score += 8
-        score = max(0, min(100, score))
+            if not neighbor_crop:
+                continue
+            if adjacency_type_for(parcel_id, neighbor_id) == "INTER_BLOCK":
+                inter_neighbor_crops.append(neighbor_crop)
+            else:
+                intra_neighbor_crops.append(neighbor_crop)
+
+        engine_output = run_rules_v2(
+            parcel_crop_id=crop_id or "",
+            intra_block_neighbor_crop_ids=intra_neighbor_crops,
+            inter_block_neighbor_crop_ids=inter_neighbor_crops,
+            village_unique_crops_count=unique_crops,
+            total_parcel_count=len(PARCELS),
+            same_crop_total_count=crop_counts.get(crop_id, 0) if crop_id else 0,
+        )
         decisions[parcel_id] = {
             "parcel_id": parcel_id,
             "season": SEASON,
-            "risk_score": score,
-            "risk_level": risk_level_from_score(score),
-            "reasons": build_reasons(reason_codes, parcel_id),
-            "recommendations": build_recommendations(parcel_id, reason_codes),
-            "confidence": 0.76,
-            "model_version": "rules_v2",
+            "risk_score": engine_output.risk_score,
+            "risk_level": engine_output.risk_level,
+            "reasons": build_reasons(engine_output.reason_codes, parcel_id),
+            "recommendations": engine_output.recommendations,
+            "confidence": engine_output.confidence,
+            "model_version": engine_output.model_version,
         }
     return decisions
 

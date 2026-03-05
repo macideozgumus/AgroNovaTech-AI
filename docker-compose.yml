@@ -17,7 +17,7 @@ services:
       retries: 10
 
   api:
-    image: python:3.9-slim
+    image: python:3.11-slim
     container_name: agronova-api
     working_dir: /workspace/backend
     environment:

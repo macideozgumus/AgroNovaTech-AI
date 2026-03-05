@@ -212,11 +212,11 @@ alembic upgrade head
 
 Seed:
 ```bash
-python scripts/seed_demo_v1.py
+python scripts/seed_demo_v2.py
 ```
 
 Beklenen:
-- `Demo seed v1 basildi: village=v1, parcels=8`
+- `Demo seed v2 basildi: village=v1, parcels=16, blocks=2`
 
 ## 9. Entegrasyon Testi (UI + API + Decision)
 ### Onerilen terminal duzeni
@@ -241,12 +241,49 @@ curl -X POST "http://127.0.0.1:8000/api/v1/decision/score" ^
 
 Tek parsel karar:
 ```bash
-curl "http://127.0.0.1:8000/api/v1/parcels/p1/decision?season=2026_Spring"
+curl "http://127.0.0.1:8000/api/v1/parcels/a_p1/decision?season=2026_Spring"
 ```
 
-Tum parseller (PowerShell):
-```powershell
-1..8 | ForEach-Object { curl "http://127.0.0.1:8000/api/v1/parcels/p$_/decision?season=2026_Spring" }
+### Sprint-2 E2E (resmi kapanis checklist)
+1. Tarla B yonunu degistir:
+```bash
+curl -X PUT "http://127.0.0.1:8000/api/v2/villages/v1/field-layout" ^
+  -H "Content-Type: application/json" ^
+  -d "{\"field_layout_position\":\"top\"}"
+```
+2. Backend layout state'i dogrula:
+```bash
+curl "http://127.0.0.1:8000/api/v2/villages/v1/field-layout"
+```
+3. INTER_BLOCK komsuluk degisimini dogrula:
+```bash
+curl "http://127.0.0.1:8000/api/v2/parcels/a_p1/neighbors?season=2026_Spring"
+```
+4. Karari tekrar hesaplat:
+```bash
+curl -X POST "http://127.0.0.1:8000/api/v1/decision/score" ^
+  -H "Content-Type: application/json" ^
+  -d "{\"village_id\":\"v1\",\"season\":\"2026_Spring\"}"
+```
+5. Risk/reason/oneriyi dogrula:
+```bash
+curl "http://127.0.0.1:8000/api/v1/parcels/a_p1/decision?season=2026_Spring"
+```
+Gecis kosulu:
+- `field_layout_position` degismeli
+- `neighbors.inter_block` degismeli
+- `risk_score` veya `reason` seti degismeli
+
+## 9.1 Docker ile tek komut akisi (gecici Sprint-2)
+`docker-compose.yml` su an gecici ama guncel Sprint-2 akisiyla calisir:
+- `alembic upgrade head`
+- `python scripts/seed_demo_v2.py`
+- `uvicorn app.main:app`
+
+Calistirma:
+```bash
+docker compose down
+docker compose up --build
 ```
 
 ## 10. UI Checklist (Kaptan Kontrolu)

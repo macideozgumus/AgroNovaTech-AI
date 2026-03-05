@@ -70,9 +70,7 @@ Tarla Blogu B'nin Tarla Blogu A'nin hangi kenarina yerlestirilecegini belirler.
 Ornek request:
 ```json
 {
-  "anchor_field_block_id": "fb_a",
-  "movable_field_block_id": "fb_b",
-  "position": "right"
+  "field_layout_position": "right"
 }
 ```
 
@@ -81,11 +79,7 @@ Ornek response:
 {
   "ok": true,
   "village_id": "v1",
-  "layout": {
-    "anchor_field_block_id": "fb_a",
-    "movable_field_block_id": "fb_b",
-    "position": "right"
-  }
+  "field_layout_position": "right"
 }
 ```
 
@@ -165,3 +159,16 @@ Ornek agirliklar:
 - Komsuluk tipi API'de gorunur
 - Risk nedenleri blok ici ve bloklar arasi etkiyi ayirt eder
 - Demo, en az iki komsu tarla blogu ile calisir
+
+## Gun-5 E2E Dogrulama (Stabilizasyon)
+Asagidaki zincir tek calistirmada gecmelidir:
+1. `PUT /api/v2/villages/{villageId}/field-layout`
+2. `GET /api/v2/villages/{villageId}/field-layout`
+3. `GET /api/v2/parcels/{parcelId}/neighbors?season=2026_Spring`
+4. `POST /api/v1/decision/score`
+5. `GET /api/v1/parcels/{parcelId}/decision?season=2026_Spring`
+
+Gecis kurali:
+- `field_layout_position` degisikligi API'de gorulmeli
+- `neighbors.inter_block` listesi aktif yone gore degismeli
+- risk sonucu (`risk_score` ve/veya `reasons`) guncellenmeli

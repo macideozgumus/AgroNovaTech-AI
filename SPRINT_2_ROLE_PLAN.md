@@ -79,3 +79,23 @@ Teslim:
 - `Tarla Blogu B` konumu degistiginde `INTER_BLOCK` komsuluklari degisir
 - Risk modeli komsu tarla etkisini ayri agirlikla hesaba katar
 - Demo, proje hedefindeki "komsu tarla analizi" iddiasini dogrudan gosterir
+
+## Sprint-2 Gun-5 Resmi Kapanis Kanitlari
+- Docker stack ayakta: `postgres` + `api`
+- Seed: `seed_demo_v2.py` ile 2 blok / 16 parsel
+- E2E zinciri kanitli:
+  - `PUT /api/v2/villages/v1/field-layout`
+  - `GET /api/v2/villages/v1/field-layout`
+  - `GET /api/v2/parcels/{id}/neighbors`
+  - `POST /api/v1/decision/score`
+  - `GET /api/v1/parcels/{id}/decision`
+- `field_layout_position` degisince `neighbors.inter_block` degisir
+- Risk sonucu aciklanabilir formatta doner:
+  - `risk_score`
+  - `risk_level`
+  - `reasons[]` (`code`, `text`)
+  - `recommendations[]` (`type`, `text`)
+
+## Sprint-2 Durum
+Kapanis karari bu kanitlar toplandiktan sonra verilir.
+Kanitlardan biri eksikse Sprint-2 "stabil demo" olarak kapatilmaz.
