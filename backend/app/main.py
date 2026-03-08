@@ -594,7 +594,7 @@ def update_field_layout(village_id: str, payload: Dict[str, Any]):
         "ok": True,
         "village_id": village_id,
         "field_layout_position": position,
-        "message": f"Tarla B yonu '{position}' olarak guncellendi. Komşuluk yeniden hesaplandı.",
+        "message": f"Tarla B yonu '{position}' olarak guncellendi. Komsuluk yeniden hesaplandi.",
     }
 @app.get("/api/v2/parcels/{parcel_id}/neighbors")
 def parcel_neighbors_v2(parcel_id: str, season: str = Query(...)):
