@@ -1,0 +1,18 @@
+﻿# Node
+node_modules/
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.venv/
+backend/.venv/
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+.vscode/
+
+# Local DB
+*.db

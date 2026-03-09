@@ -1,0 +1,45 @@
+﻿import type { ExpoConfig } from "expo/config";
+
+const config: ExpoConfig = {
+  name: "mobile-app",
+  slug: "mobile-app",
+  version: "1.0.0",
+  orientation: "portrait",
+  icon: "./assets/images/icon.png",
+  scheme: "mobileapp",
+  userInterfaceStyle: "automatic",
+  newArchEnabled: true,
+  ios: { supportsTablet: true },
+  android: {
+    adaptiveIcon: {
+      backgroundColor: "#E6F4FE",
+      foregroundImage: "./assets/images/android-icon-foreground.png",
+      backgroundImage: "./assets/images/android-icon-background.png",
+      monochromeImage: "./assets/images/android-icon-monochrome.png",
+    },
+    edgeToEdgeEnabled: true,
+    predictiveBackGestureEnabled: false,
+  },
+  web: {
+    output: "static",
+    favicon: "./assets/images/favicon.png",
+  },
+  plugins: [
+    [
+      "expo-splash-screen",
+      {
+        image: "./assets/images/splash-icon.png",
+        imageWidth: 200,
+        resizeMode: "contain",
+        backgroundColor: "#ffffff",
+        dark: { backgroundColor: "#000000" },
+      },
+    ],
+  ],
+  experiments: { reactCompiler: true },
+  extra: {
+    apiBaseUrl: process.env.EXPO_PUBLIC_API_BASE_URL || "http://192.168.1.38:8000",
+  },
+};
+
+export default config;
