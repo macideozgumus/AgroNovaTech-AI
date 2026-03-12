@@ -1,0 +1,13 @@
+version: "3.9"
+
+services:
+  backend:
+    build: .
+    container_name: agronova-backend
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend/app/agronova.db:/app/backend/app/agronova.db
+    environment:
+      - PYTHONUNBUFFERED=1
+    restart: unless-stopped
