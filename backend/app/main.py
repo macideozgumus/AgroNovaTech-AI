@@ -204,12 +204,19 @@ def list_parcels(village_id: str) -> ParcelListResponse:
 
 @app.get("/api/v1/metrics/latency")
 def latency_metrics() -> dict:
-    samples = list(LATENCY_SAMPLES_MS)
+    # Macide - Persembe ozgun requirement: p50 ve p95 latency metrikleri
+    # p50 (medyan): isteklerin yarisi bu sureden hizli - tek yavас istegin ortalamayı bozmasını onler
+    # p95: isteklerin %95'i bu sureden hizli - gercek performans siniri
+    samples = sorted(LATENCY_SAMPLES_MS)
     avg = sum(samples) / len(samples) if samples else 0.0
+    p50 = samples[len(samples) // 2] if samples else None
+    p95 = samples[int(len(samples) * 0.95)] if samples else None
     return {
         "target_ms": 800,
         "sample_count": len(samples),
         "avg_ms": round(avg, 2),
+        "p50_ms": round(p50, 2) if p50 is not None else None,
+        "p95_ms": round(p95, 2) if p95 is not None else None,
         "latest_ms": round(samples[-1], 2) if samples else None,
         "under_target": avg < 800 if samples else True,
     }
