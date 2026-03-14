@@ -75,8 +75,16 @@ Beklenen forwarding satiri:
 `https://<random>.ngrok-free.dev -> http://localhost:8000`
 
 Kontrol:
-- Tarayicida `https://<random>.ngrok-free.dev/health` ac
-- Beklenen: `{"status":"ok"}`
+- Tarayicida su iki adresi kontrol et:
+  - `https://<random>.ngrok-free.dev/health`
+  - `https://<random>.ngrok-free.dev/docs`
+- Beklenen:
+  - `/health` => `{"status":"ok"}`
+  - `/docs` => FastAPI Swagger arayuzu acilir
+
+Not:
+- `https://<random>.ngrok-free.dev/` kok path'inde `{"detail":"Not Found"}` gormen normaldir.
+- Cunku backend'de `/` route tanimli degildir.
 
 ## Adim 4: Expo'yu tunnel ile baslat
 Yeni terminalde:
@@ -136,6 +144,18 @@ Kontrol listesi:
 - `0.0.0.0` browser adresi degil, bind adresidir.
 - PC icin: `http://127.0.0.1:8000/health`
 
+### Hata F: `GET /api/v1/parcels/{id}/decision` 404
+- Her zaman bug degildir.
+- Bu endpoint, ilgili `parcel_id + season` icin karar daha once persist edilmediyse `404` doner.
+- Beklenen dogru akis:
+  1. `GET decision` => 404
+  2. `POST /api/v1/decision/score` => 200
+  3. `GET decision` => 200
+- Hata sayilmasi icin:
+  - `POST /decision/score` sonrasinda
+  - ayni `parcel + season` icin
+  - `GET decision` hala surekli `404` donmeli
+
 ---
 
 ## 7. Gun Sonu Kapanis Kontrolu
@@ -145,6 +165,10 @@ Asagidaki 5 madde true ise akış saglikli:
 3. Expo logunda `[AgroNova][API] Base URL: https://<ngrok>`
 4. Mobil login basarili
 5. Login sonrasi parcel/decision ekranlari veri cekiyor
+
+Ek entegrasyon kontrolu:
+6. `https://<ngrok>/docs` aciliyor
+7. `GET decision` 404 gelirse sonraki `POST score` sonrasi veri olusuyor
 
 ---
 
