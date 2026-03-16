@@ -5,11 +5,13 @@ import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import { LoginScreen } from "../screens/LoginScreen";
 import { VillageParcelsScreen } from "../screens/VillageParcelsScreen";
 import { DecisionScreen } from "../screens/DecisionScreen";
+import { ScenarioBuilderScreen } from "../screens/ScenarioBuilderScreen";
 
 export type RootStackParamList = {
   Login: undefined;
   VillageParcels: undefined;
   Decision: { parcelId: string; season: string };
+  ScenarioBuilder: { focusParcelId?: string } | undefined;
 };
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -20,16 +22,14 @@ export function AppNavigator() {
       <Stack.Navigator
         initialRouteName="Login"
         screenOptions={{
-          headerStyle: { backgroundColor: "#241712" },
-          headerTintColor: "#f7efe5",
-          headerShadowVisible: false,
-          contentStyle: { backgroundColor: "#241712" },
-          headerTitleStyle: { fontWeight: "800" },
+          headerShown: false,
+          contentStyle: { backgroundColor: "#F4F6F2" },
         }}
       >
-        <Stack.Screen name="Login" component={LoginScreen} options={{ title: "Giris" }} />
-        <Stack.Screen name="VillageParcels" component={VillageParcelsScreen} options={{ title: "Koy Genel Bakis" }} />
-        <Stack.Screen name="Decision" component={DecisionScreen} options={{ title: "Parsel Karari" }} />
+        <Stack.Screen name="Login" component={LoginScreen} />
+        <Stack.Screen name="VillageParcels" component={VillageParcelsScreen} />
+        <Stack.Screen name="Decision" component={DecisionScreen} />
+        <Stack.Screen name="ScenarioBuilder" component={ScenarioBuilderScreen} />
       </Stack.Navigator>
     </NavigationContainer>
   );

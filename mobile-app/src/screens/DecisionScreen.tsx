@@ -1,18 +1,58 @@
-﻿import React, { useEffect, useState } from "react";
-import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from "react-native";
+import React, { useEffect, useMemo, useState } from "react";
+import {
+  ActivityIndicator,
+  Image,
+  ImageBackground,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from "react-native";
 import { NativeStackScreenProps } from "@react-navigation/native-stack";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { apiClient } from "../api/client";
 import { loadDecisionCache, saveDecisionCache } from "../api/cache";
 import { ReasonList, sortReasonCodes } from "../components/reasons";
-import { PrimaryButton, RiskBadge, ScreenShell, SectionCard, colors } from "../components/ui";
 import { RootStackParamList } from "../navigation/AppNavigator";
 import type { DecisionResponse } from "../types/api";
+import {
+  cropVisuals,
+  getCropIconUri,
+  getFriendlyParcelName,
+  getFriendlyParcelSubtitle,
+  getParcelArea,
+  palette,
+  riskTone,
+  type CropKey,
+} from "../utils/farmUi";
 
 type Props = NativeStackScreenProps<RootStackParamList, "Decision">;
 
-export function DecisionScreen({ route }: Props) {
+const parcelPreviewMap =
+  "https://images.unsplash.com/photo-1501004318641-b39e6451bec6?auto=format&fit=crop&w=1400&q=80";
+
+const parcelCropMap: Record<string, CropKey> = {
+  a_p1: "corn",
+  a_p2: "sunflower",
+  a_p3: "wheat",
+  a_p4: "corn",
+  a_p5: "corn",
+  a_p6: "barley",
+  a_p7: "wheat",
+  a_p8: "corn",
+  b_p1: "sunflower",
+  b_p2: "wheat",
+  b_p3: "corn",
+  b_p4: "barley",
+  b_p5: "sunflower",
+  b_p6: "wheat",
+  b_p7: "corn",
+  b_p8: "barley",
+};
+
+export function DecisionScreen({ route, navigation }: Props) {
   const { parcelId, season } = route.params;
   const [loading, setLoading] = useState(false);
   const [errorText, setErrorText] = useState<string | null>(null);
@@ -21,7 +61,7 @@ export function DecisionScreen({ route }: Props) {
   useEffect(() => {
     let mounted = true;
 
-    const primeFromCacheAndServer = async () => {
+    const prime = async () => {
       const cached = await loadDecisionCache(parcelId, season);
       if (mounted && cached) {
         setDecision(cached);
@@ -34,12 +74,11 @@ export function DecisionScreen({ route }: Props) {
         }
         await saveDecisionCache(current);
       } catch {
-        // decision yoksa ekran bos state ile devam eder
+        // empty state is acceptable
       }
     };
 
-    primeFromCacheAndServer();
-
+    prime();
     return () => {
       mounted = false;
     };
@@ -65,200 +104,223 @@ export function DecisionScreen({ route }: Props) {
     }
   };
 
+  const cropKey = parcelCropMap[parcelId] ?? "wheat";
+  const cropVisual = cropVisuals[cropKey];
+  const tone = riskTone(decision?.risk_level ?? "UNKNOWN");
+  const mockNeighbors = useMemo(
+    () => [
+      { id: `${parcelId}-north`, label: "Kuzey komşusu", crop: "Buğday", area: "0.8 ha" },
+      { id: `${parcelId}-east`, label: "Doğu komşusu", crop: "Ayçiçeği", area: "1.1 ha" },
+    ],
+    [parcelId],
+  );
+
   return (
     <SafeAreaView style={styles.safeArea} edges={["left", "right"]}>
-      <ScreenShell contentStyle={styles.content}>
-        <ScrollView contentContainerStyle={styles.scrollContent}>
-          <View style={styles.heroRow}>
-            <View style={styles.heroCopy}>
-              <Text style={styles.overline}>PARSEL ANALIZI</Text>
-              <Text style={styles.title}>{parcelId.toUpperCase()}</Text>
-              <Text style={styles.subtitle}>Sezon: {season}</Text>
+      <View style={styles.page}>
+        <View style={styles.topBar}>
+          <Pressable style={styles.iconButton} onPress={() => navigation.goBack()}>
+            <Text style={styles.iconButtonText}>←</Text>
+          </Pressable>
+          <Text style={styles.pageTitle}>Parsel Detayı ve Ürün Seçimi</Text>
+          <View style={styles.closeGhost}>
+            <Text style={styles.closeGhostText}>×</Text>
+          </View>
+        </View>
+
+        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
+          <View style={styles.heroCard}>
+            <View style={styles.heroTop}>
+              <View>
+                <Text style={styles.heroTitle}>{getFriendlyParcelName(parcelId)}</Text>
+                <Text style={styles.heroArea}>
+                  {getFriendlyParcelSubtitle(parcelId)} • {getParcelArea(parcelId)}
+                </Text>
+              </View>
+              <View style={[styles.statusPill, { backgroundColor: tone.badgeBg }]}>
+                <Text style={[styles.statusPillText, { color: tone.badgeFg }]}>{tone.text}</Text>
+              </View>
             </View>
-            <RiskBadge level={decision?.risk_level ?? "UNKNOWN"} />
+
+            <ImageBackground source={{ uri: parcelPreviewMap }} style={styles.mapCard} imageStyle={styles.mapCardImage}>
+              <View style={styles.mapMarker}>
+                <Image
+                  source={{ uri: getCropIconUri(cropKey, decision?.risk_level === "CRITICAL" ? "wilted" : "normal") }}
+                  style={styles.mapMarkerImage}
+                />
+              </View>
+            </ImageBackground>
           </View>
 
-          <SectionCard style={styles.summaryCard}>
-            <View style={styles.summaryTop}>
-              <View>
-                <Text style={styles.summaryLabel}>Risk skoru</Text>
-                <Text style={styles.summaryValue}>{decision ? decision.risk_score : "--"}</Text>
-              </View>
-              <View style={styles.summaryMeta}>
-                <Text style={styles.metaLabel}>Model</Text>
-                <Text style={styles.metaValue}>{decision?.model_version ?? "rules_v2"}</Text>
-                <Text style={styles.metaLabel}>Kaynak</Text>
-                <Text style={styles.metaValue}>{decision?.decision_source ?? "bekleniyor"}</Text>
-              </View>
+          <View style={styles.sectionBlock}>
+            <Text style={styles.sectionLabel}>Ekilecek Ürün Tipi</Text>
+            <View style={styles.selectCard}>
+              <Text style={styles.selectValue}>{cropVisual.label}</Text>
+              <Text style={styles.selectArrow}>⌄</Text>
             </View>
+          </View>
 
-            <View style={styles.noteCard}>
-              <Text style={styles.noteIcon}>!</Text>
-              <Text style={styles.noteText}>
-                Hesaplanan karar parcelle ayni sezonda saklanir. Istersen yeniden hesaplayip son durumu guncelleyebilirsin.
-              </Text>
+          <View style={styles.toggleCard}>
+            <View>
+              <Text style={styles.toggleTitle}>Komşu Etkileşimi</Text>
+              <Text style={styles.toggleDetail}>Komşu ürün verilerini optimizasyona dahil et</Text>
             </View>
-          </SectionCard>
+            <View style={styles.toggleSwitch}>
+              <View style={styles.toggleKnob} />
+            </View>
+          </View>
 
-          <PrimaryButton title={loading ? "Karar uretiliyor..." : "Karar Hesapla"} disabled={loading} onPress={fetchDecision} />
-
-          <SectionCard style={styles.resultCard}>
-            {loading && <ActivityIndicator color={colors.accent} />}
-            {!loading && errorText && <Text style={styles.error}>{errorText}</Text>}
-            {!loading && !errorText && !decision && <Text style={styles.empty}>Henuz karar yok.</Text>}
-            {!loading && decision && (
-              <>
-                <View style={styles.infoGrid}>
-                  <View style={styles.infoTile}>
-                    <Text style={styles.tileLabel}>Confidence</Text>
-                    <Text style={styles.tileValue}>
-                      {decision.confidence === null ? "Yok" : `${Math.round(decision.confidence * 100)}%`}
-                    </Text>
+          <View style={styles.sectionBlock}>
+            <Text style={styles.sectionLabel}>Komşu Parseller</Text>
+            <View style={styles.neighborStack}>
+              {mockNeighbors.map((neighbor) => (
+                <View key={neighbor.id} style={styles.neighborCard}>
+                  <View style={styles.neighborIconWrap}>
+                    <Image source={{ uri: getCropIconUri("wheat") }} style={styles.neighborIconImage} />
                   </View>
-                  <View style={styles.infoTile}>
-                    <Text style={styles.tileLabel}>Risk seviyesi</Text>
-                    <Text style={styles.tileValue}>{decision.risk_level}</Text>
+                  <View style={styles.neighborCopy}>
+                    <Text style={styles.neighborTitle}>{neighbor.label}</Text>
+                    <Text style={styles.neighborDetail}>Ürün: {neighbor.crop}</Text>
                   </View>
+                  <Text style={styles.neighborArea}>{neighbor.area}</Text>
                 </View>
+              ))}
+            </View>
+          </View>
 
-                <Text style={styles.sectionTitle}>Risk nedenleri</Text>
-                <ReasonList reasonCodes={sortReasonCodes(decision.reason_codes)} />
-              </>
+          <View style={styles.summaryCard}>
+            <View style={styles.summaryHeader}>
+              <Text style={styles.summaryTitle}>Risk Özeti</Text>
+              <View style={[styles.statusPill, { backgroundColor: tone.badgeBg }]}>
+                <Text style={[styles.statusPillText, { color: tone.badgeFg }]}>{tone.text}</Text>
+              </View>
+            </View>
+
+            <View style={styles.summaryGrid}>
+              <View style={styles.summaryTile}>
+                <Text style={styles.summaryTileLabel}>Risk skoru</Text>
+                <Text style={styles.summaryTileValue}>{decision?.risk_score ?? "--"}</Text>
+              </View>
+              <View style={styles.summaryTile}>
+                <Text style={styles.summaryTileLabel}>Güven</Text>
+                <Text style={styles.summaryTileValue}>
+                  {decision?.confidence !== null && decision?.confidence !== undefined
+                    ? `${Math.round(decision.confidence * 100)}%`
+                    : "--"}
+                </Text>
+              </View>
+            </View>
+
+            {loading ? <ActivityIndicator color={palette.green} /> : null}
+            {errorText ? <Text style={styles.errorText}>{errorText}</Text> : null}
+
+            {decision ? (
+              <ReasonList reasonCodes={sortReasonCodes(decision.reason_codes)} />
+            ) : (
+              <Text style={styles.emptyText}>Karar hesaplandığında risk nedenleri burada gösterilecek.</Text>
             )}
-          </SectionCard>
+
+            <Pressable style={styles.primaryButton} onPress={fetchDecision} disabled={loading}>
+              <Text style={styles.primaryButtonText}>{loading ? "Hesaplanıyor..." : "Karar Hesapla"}</Text>
+            </Pressable>
+          </View>
         </ScrollView>
-      </ScreenShell>
+      </View>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  safeArea: { flex: 1, backgroundColor: colors.appBg },
-  content: { gap: 18 },
-  scrollContent: { gap: 18, paddingBottom: 28 },
-  heroRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "flex-start",
-    gap: 12,
-  },
-  heroCopy: {
-    flex: 1,
-    gap: 6,
-  },
-  overline: {
-    color: "#927863",
-    fontSize: 12,
-    fontWeight: "700",
-    letterSpacing: 1.1,
-  },
-  title: {
-    color: "#f8efe3",
-    fontSize: 30,
-    fontWeight: "900",
-  },
-  subtitle: {
-    color: "#baa79b",
-    fontSize: 15,
-  },
-  summaryCard: {
-    backgroundColor: "#1a1c2a",
-    borderColor: "#323653",
-    gap: 18,
-  },
-  summaryTop: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    gap: 12,
-  },
-  summaryLabel: {
-    color: "#98a0ba",
-    fontSize: 15,
-  },
-  summaryValue: {
-    marginTop: 8,
-    color: "#ffffff",
-    fontSize: 40,
-    fontWeight: "900",
-  },
-  summaryMeta: {
-    alignItems: "flex-end",
-    gap: 4,
-  },
-  metaLabel: {
-    color: "#857c97",
-    fontSize: 12,
-    fontWeight: "700",
-  },
-  metaValue: {
-    color: "#f3ebdf",
-    fontSize: 15,
-    fontWeight: "700",
-    marginBottom: 6,
-  },
-  noteCard: {
+  safeArea: { flex: 1, backgroundColor: palette.page },
+  page: { flex: 1, backgroundColor: palette.page },
+  topBar: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 12,
-    backgroundColor: "#2a2327",
-    borderRadius: 18,
-    padding: 14,
+    justifyContent: "space-between",
+    paddingHorizontal: 18,
+    paddingTop: 8,
+    paddingBottom: 14,
+    backgroundColor: palette.card,
   },
-  noteIcon: {
-    width: 34,
-    height: 34,
+  iconButton: { width: 52, height: 52, borderRadius: 16, alignItems: "center", justifyContent: "center", backgroundColor: palette.card },
+  iconButtonText: { color: palette.green, fontSize: 28, fontWeight: "700" },
+  pageTitle: { flex: 1, color: palette.text, fontSize: 19, fontWeight: "900", textAlign: "center", marginHorizontal: 10 },
+  closeGhost: { width: 52, height: 52, borderRadius: 16, alignItems: "center", justifyContent: "center", backgroundColor: "#9AA08D" },
+  closeGhostText: { color: "#FFFFFF", fontSize: 28, lineHeight: 30 },
+  scrollContent: { padding: 18, gap: 18, paddingBottom: 28 },
+  heroCard: { backgroundColor: palette.card, borderRadius: 28, padding: 16, gap: 16 },
+  heroTop: { flexDirection: "row", justifyContent: "space-between", gap: 12 },
+  heroTitle: { color: palette.text, fontSize: 24, fontWeight: "900" },
+  heroArea: { marginTop: 8, color: palette.green, fontSize: 18, fontWeight: "800" },
+  statusPill: { borderRadius: 999, paddingHorizontal: 16, paddingVertical: 10, alignSelf: "flex-start" },
+  statusPillText: { fontSize: 13, fontWeight: "800", textTransform: "uppercase" },
+  mapCard: { minHeight: 220, justifyContent: "center", alignItems: "center" },
+  mapCardImage: { borderRadius: 24 },
+  mapMarker: {
+    width: 74,
+    height: 74,
     borderRadius: 999,
-    backgroundColor: colors.accent,
-    color: "#fff",
-    textAlign: "center",
-    textAlignVertical: "center",
-    lineHeight: 34,
-    fontWeight: "800",
-    fontSize: 18,
+    overflow: "hidden",
+    borderWidth: 3,
+    borderColor: "#FFFFFF",
+    backgroundColor: "rgba(255,255,255,0.96)",
+    alignItems: "center",
+    justifyContent: "center",
   },
-  noteText: {
-    flex: 1,
-    color: "#e6d4c3",
-    fontSize: 14,
-    lineHeight: 21,
-  },
-  resultCard: {
-    gap: 16,
-  },
-  error: {
-    color: "#ffac9d",
-    fontSize: 15,
-  },
-  empty: {
-    color: "#b7a296",
-    fontSize: 15,
-  },
-  infoGrid: {
+  mapMarkerImage: { width: "100%", height: "100%" },
+  sectionBlock: { gap: 10 },
+  sectionLabel: { color: palette.text, fontSize: 20, fontWeight: "800" },
+  selectCard: {
+    minHeight: 82,
+    backgroundColor: palette.card,
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: palette.line,
+    paddingHorizontal: 18,
     flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  selectValue: { color: palette.text, fontSize: 20, fontWeight: "500" },
+  selectArrow: { color: palette.green, fontSize: 26, fontWeight: "700" },
+  toggleCard: {
+    backgroundColor: "#EEF4E8",
+    borderRadius: 24,
+    padding: 18,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
     gap: 12,
   },
-  infoTile: {
-    flex: 1,
-    backgroundColor: "#35261d",
+  toggleTitle: { color: palette.text, fontSize: 18, fontWeight: "800" },
+  toggleDetail: { color: palette.muted, fontSize: 15, marginTop: 4 },
+  toggleSwitch: { width: 62, height: 36, borderRadius: 999, backgroundColor: "#8DBA7E", justifyContent: "center", paddingHorizontal: 4, alignItems: "flex-end" },
+  toggleKnob: { width: 28, height: 28, borderRadius: 999, backgroundColor: "#FFFFFF" },
+  neighborStack: { gap: 12 },
+  neighborCard: { flexDirection: "row", alignItems: "center", gap: 12, backgroundColor: palette.card, borderRadius: 22, padding: 16 },
+  neighborIconWrap: {
+    width: 58,
+    height: 58,
     borderRadius: 18,
-    borderWidth: 1,
-    borderColor: "#493227",
-    padding: 14,
-    gap: 8,
+    backgroundColor: "#F7F7F3",
+    overflow: "hidden",
+    alignItems: "center",
+    justifyContent: "center",
   },
-  tileLabel: {
-    color: "#a8968a",
-    fontSize: 13,
-    fontWeight: "700",
-  },
-  tileValue: {
-    color: "#fff7eb",
-    fontSize: 22,
-    fontWeight: "800",
-  },
-  sectionTitle: {
-    color: "#fff6eb",
-    fontSize: 18,
-    fontWeight: "800",
-  },
+  neighborIconImage: { width: "100%", height: "100%" },
+  neighborCopy: { flex: 1 },
+  neighborTitle: { color: palette.text, fontSize: 17, fontWeight: "800" },
+  neighborDetail: { color: palette.green, fontSize: 15, marginTop: 4 },
+  neighborArea: { color: palette.muted, fontSize: 16, fontWeight: "600" },
+  summaryCard: { backgroundColor: palette.card, borderRadius: 28, padding: 18, gap: 16 },
+  summaryHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: 12 },
+  summaryTitle: { color: palette.text, fontSize: 20, fontWeight: "900" },
+  summaryGrid: { flexDirection: "row", gap: 12 },
+  summaryTile: { flex: 1, borderRadius: 20, backgroundColor: "#F5F3EE", padding: 14, gap: 6 },
+  summaryTileLabel: { color: palette.muted, fontSize: 13, fontWeight: "700" },
+  summaryTileValue: { color: palette.text, fontSize: 24, fontWeight: "900" },
+  errorText: { color: palette.red, fontSize: 14, fontWeight: "700" },
+  emptyText: { color: palette.muted, fontSize: 14, lineHeight: 20 },
+  primaryButton: { minHeight: 56, borderRadius: 18, backgroundColor: "#BFD9B8", alignItems: "center", justifyContent: "center" },
+  primaryButtonText: { color: "#35522E", fontSize: 16, fontWeight: "900" },
 });

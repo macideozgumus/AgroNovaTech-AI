@@ -1,4 +1,8 @@
-﻿import type { ExpoConfig } from "expo/config";
+import type { ExpoConfig } from "expo/config";
+
+const defaultApiBaseUrl =
+  process.env.EXPO_PUBLIC_API_BASE_URL ||
+  (process.env.EXPO_OS === "web" ? "http://localhost:8000" : "http://192.168.1.12:8000");
 
 const config: ExpoConfig = {
   name: "mobile-app",
@@ -38,7 +42,7 @@ const config: ExpoConfig = {
   ],
   experiments: { reactCompiler: true },
   extra: {
-    apiBaseUrl: process.env.EXPO_PUBLIC_API_BASE_URL || "http://192.168.1.38:8000",
+    apiBaseUrl: defaultApiBaseUrl,
   },
 };
 
