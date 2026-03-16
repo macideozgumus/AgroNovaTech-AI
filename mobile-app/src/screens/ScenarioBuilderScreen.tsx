@@ -23,6 +23,9 @@ type ScenarioParcelState = Record<string, CropKey>;
 
 const DEFAULT_SEASON = "2026_Spring";
 const cropOptions: CropKey[] = ["corn", "sunflower", "wheat", "barley"];
+const palette = {
+  red: "#E0675C",
+};
 
 function scoreScenario(
   parcel: ParcelItem,

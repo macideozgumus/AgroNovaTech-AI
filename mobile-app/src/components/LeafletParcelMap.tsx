@@ -1,9 +1,8 @@
 import React, { useMemo } from "react";
 import { Image, Platform, Pressable, StyleSheet, Text, View } from "react-native";
-import { WebView } from "react-native-webview";
 
 import type { ParcelItem, RiskLevel } from "../types/api";
-import { getCropIconUri, getFriendlyParcelName, riskTone, type CropKey } from "../utils/farmUi";
+import { getCropIconUri, getCropImageSource, getFriendlyParcelName, riskTone, type CropKey } from "../utils/farmUi";
 
 type ParcelMapItem = {
   parcel: ParcelItem;
@@ -25,6 +24,7 @@ type ParcelFeature = {
   color: string;
   borderColor: string;
   mine: boolean;
+  cropKey: CropKey;
   cropIcon: string;
   coordinates: [number, number][];
 };
@@ -159,7 +159,11 @@ export function LeafletParcelMap({ items, selectedParcelId, onParcelPress }: Pro
           color: tone.fieldFill,
           borderColor: item.isMine ? "#2F7D44" : "#8F7A62",
           mine: item.isMine,
-          cropIcon: getCropIconUri(item.cropKey, item.riskLevel === "CRITICAL" ? "wilted" : "normal"),
+          cropKey: item.cropKey,
+          cropIcon:
+            Platform.OS === "web"
+              ? ""
+              : getCropIconUri(item.cropKey, item.riskLevel === "CRITICAL" ? "wilted" : "normal"),
           coordinates: buildParcelPolygon(center[0] + offset.lat, center[1] + offset.lng),
         };
       }),
@@ -186,7 +190,10 @@ export function LeafletParcelMap({ items, selectedParcelId, onParcelPress }: Pro
               onPress={() => onParcelPress?.(feature.id)}
             >
               <Text style={styles.webParcelTitle}>{feature.name}</Text>
-              <Image source={{ uri: feature.cropIcon }} style={styles.webParcelIcon} />
+              <Image
+                source={getCropImageSource(feature.cropKey, feature.riskText === "Yüksek Risk" ? "wilted" : "normal")}
+                style={styles.webParcelIcon}
+              />
               <Text style={styles.webParcelRisk}>{feature.riskText}</Text>
             </Pressable>
           ))}
@@ -194,6 +201,8 @@ export function LeafletParcelMap({ items, selectedParcelId, onParcelPress }: Pro
       </View>
     );
   }
+
+  const { WebView } = require("react-native-webview");
 
   return (
     <WebView

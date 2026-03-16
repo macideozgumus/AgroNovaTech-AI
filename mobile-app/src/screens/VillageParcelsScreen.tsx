@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+﻿import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Image,
@@ -11,25 +11,43 @@ import {
   View,
 } from "react-native";
 import { NativeStackScreenProps } from "@react-navigation/native-stack";
+import { useFocusEffect } from "@react-navigation/native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { apiClient } from "../api/client";
 import { LeafletParcelMap } from "../components/LeafletParcelMap";
 import { RootStackParamList } from "../navigation/AppNavigator";
+import { getSavedScenarios, type SavedScenario } from "../scenario/store";
 import type { DecisionResponse, ParcelItem, RiskLevel } from "../types/api";
 import {
   cropVisuals,
+  getCropImageSource,
   getCropIconUri,
   getFriendlyParcelName,
   getFriendlyParcelSubtitle,
   getParcelArea,
-  palette,
   riskTone,
   type CropKey,
 } from "../utils/farmUi";
 
 type Props = NativeStackScreenProps<RootStackParamList, "VillageParcels">;
-type DashboardMode = "MY_FIELDS" | "VILLAGE" | "HARVEST";
+
+const palette = {
+  page: "#F3F1E8",
+  card: "#FFFDF8",
+  line: "#D9D3C3",
+  text: "#223127",
+  muted: "#6F7C72",
+  softGreen: "#DCEFD8",
+  green: "#5B8C5A",
+  softBrown: "#E8DCC8",
+  brown: "#8C6745",
+  red: "#E0675C",
+  yellow: "#E5B84C",
+  safe: "#7FAF6A",
+  gray: "#A4AAA1",
+};
+type DashboardMode = "MY_FIELDS" | "VILLAGE" | "HARVEST" | "SCENARIOS";
 type OwnershipFilter = "ALL" | "MINE" | "NEIGHBOR";
 type DecisionMap = Record<string, DecisionResponse | undefined>;
 type ScenarioCard = {
@@ -51,6 +69,7 @@ const cropOptions: { key: CropKey; label: string }[] = [
 const modeMeta: Record<DashboardMode, { eyebrow: string; title: string }> = {
   MY_FIELDS: { eyebrow: "AgroNova", title: "Ana Sayfa" },
   VILLAGE: { eyebrow: "Köy Analizi", title: "Köy Geneli" },
+  SCENARIOS: { eyebrow: "Senaryo Merkezi", title: "Kaydedilen Senaryolar" },
   HARVEST: { eyebrow: "Takvim", title: "Hasat Planı" },
 };
 
@@ -66,6 +85,7 @@ export function VillageParcelsScreen({ navigation }: Props) {
   const [selectedParcelId, setSelectedParcelId] = useState<string | null>(null);
   const [scenarioCrop, setScenarioCrop] = useState<CropKey>("corn");
   const [scenarioCards] = useState<Record<string, ScenarioCard[]>>({});
+  const [savedScenarios, setSavedScenarios] = useState<SavedScenario[]>([]);
 
   useEffect(() => {
     let mounted = true;
@@ -117,6 +137,12 @@ export function VillageParcelsScreen({ navigation }: Props) {
       mounted = false;
     };
   }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      setSavedScenarios(getSavedScenarios());
+    }, []),
+  );
 
   const decisionLevel = useCallback(
     (parcelId: string): RiskLevel | "UNKNOWN" => decisions[parcelId]?.risk_level ?? "UNKNOWN",
@@ -195,6 +221,42 @@ export function VillageParcelsScreen({ navigation }: Props) {
   const villageStatus = summary.critical === 0 ? "Mükemmel" : summary.critical < 3 ? "Dengeli" : "İzlenmeli";
   const openScenarioBuilder = () =>
     navigation.navigate("ScenarioBuilder", { focusParcelId: selectedParcel?.parcel_id ?? undefined });
+
+  const renderSavedScenarios = () => (
+    <View style={styles.sectionCard}>
+      <Text style={styles.sectionTitle}>Kaydedilen Senaryolar</Text>
+      <Text style={styles.sectionSubtitle}>
+        Senaryo oluşturucuda kaydettiğin kombinasyonlara buradan tekrar ulaşıp inceleyebilirsin.
+      </Text>
+
+      {savedScenarios.length === 0 ? (
+        <View style={styles.emptyState}>
+          <Text style={styles.emptyStateTitle}>Henüz kayıtlı senaryo yok</Text>
+          <Text style={styles.emptyStateText}>
+            Önce bir araştırma senaryosu oluştur ve kaydet. Sonra bu panelden tüm kayıtlarına geri dönebilirsin.
+          </Text>
+          <Pressable style={styles.primaryButton} onPress={openScenarioBuilder}>
+            <Text style={styles.primaryButtonText}>Senaryo Oluştur</Text>
+          </Pressable>
+        </View>
+      ) : (
+        savedScenarios.map((scenario) => (
+          <Pressable
+            key={scenario.id}
+            style={styles.savedScenarioCard}
+            onPress={() => navigation.navigate("ScenarioBuilder", { focusParcelId: scenario.parcels[0]?.parcelId })}
+          >
+            <View style={styles.savedScenarioHeader}>
+              <Text style={styles.savedScenarioTitle}>{scenario.name}</Text>
+              <Text style={styles.savedScenarioMeta}>{scenario.createdAt}</Text>
+            </View>
+            <Text style={styles.savedScenarioSummary}>{scenario.summary}</Text>
+            <Text style={styles.savedScenarioCount}>{scenario.parcels.length} parsel senaryosu</Text>
+          </Pressable>
+        ))
+      )}
+    </View>
+  );
 
   const renderProfessionalHome = () => (
     <>
@@ -349,7 +411,7 @@ export function VillageParcelsScreen({ navigation }: Props) {
               <View style={styles.selectionLead}>
                 <View style={styles.selectionIconCircle}>
                   <Image
-                    source={{ uri: getCropIconUri(selectedCropKey, selectedLevel === "CRITICAL" ? "wilted" : "normal") }}
+                    source={getCropImageSource(selectedCropKey, selectedLevel === "CRITICAL" ? "wilted" : "normal")}
                     style={styles.selectionLeadIcon}
                   />
                 </View>
@@ -426,7 +488,7 @@ export function VillageParcelsScreen({ navigation }: Props) {
               style={[styles.cropOptionCard, scenarioCrop === option.key && styles.cropOptionCardActive]}
               onPress={() => setScenarioCrop(option.key)}
             >
-              <Image source={{ uri: getCropIconUri(option.key) }} style={styles.cropOptionImage} />
+              <Image source={getCropImageSource(option.key)} style={styles.cropOptionImage} />
               <Text style={styles.cropOptionLabel}>{option.label}</Text>
             </Pressable>
           ))}
@@ -499,6 +561,8 @@ export function VillageParcelsScreen({ navigation }: Props) {
                   "Köy geneli ikinci adım",
                   "Bu ekranı bir sonraki turda aynı profesyonel tasarım diliyle, toplu harita ve istatistik mantığıyla kuracağız.",
                 )
+              : mode === "SCENARIOS"
+                ? renderSavedScenarios()
               : renderPlaceholder(
                   "Hasat planı ikinci adım",
                   "Ana sayfayı profesyonel seviyeye aldıktan sonra hasat planını aynı görsel sistemle ilerleteceğim.",
@@ -513,6 +577,7 @@ export function VillageParcelsScreen({ navigation }: Props) {
             {[
               { key: "MY_FIELDS" as const, label: "Kendi Tarlam" },
               { key: "VILLAGE" as const, label: "Köy Geneli" },
+              { key: "SCENARIOS" as const, label: "Kaydedilen Senaryolar" },
               { key: "HARVEST" as const, label: "Hasat Planı" },
             ].map((item) => (
               <Pressable
@@ -799,6 +864,12 @@ const styles = StyleSheet.create({
   scenarioTitle: { color: "#243224", fontSize: 18, fontWeight: "800" },
   scenarioCrop: { color: "#7B6246", fontSize: 13, fontWeight: "700" },
   scenarioReport: { color: "#5F6D61", fontSize: 14, lineHeight: 21 },
+  savedScenarioCard: { borderRadius: 22, backgroundColor: "#FFFEFB", borderWidth: 1, borderColor: "#E7E1D6", padding: 16, gap: 10 },
+  savedScenarioHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", gap: 12 },
+  savedScenarioTitle: { color: "#243224", fontSize: 18, fontWeight: "900", flex: 1 },
+  savedScenarioMeta: { color: "#7B8895", fontSize: 12, fontWeight: "700" },
+  savedScenarioSummary: { color: "#5F6D61", fontSize: 14, lineHeight: 21 },
+  savedScenarioCount: { color: "#7B6246", fontSize: 13, fontWeight: "800" },
   summaryRows: { gap: 10 },
   summaryLine: {
     flexDirection: "row",
@@ -831,3 +902,6 @@ const styles = StyleSheet.create({
   drawerItemText: { color: "#263227", fontSize: 16, fontWeight: "800" },
   drawerItemTextActive: { color: "#375436" },
 });
+
+
+

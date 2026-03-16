@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+﻿import React, { useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Image,
@@ -19,16 +19,32 @@ import { RootStackParamList } from "../navigation/AppNavigator";
 import type { DecisionResponse } from "../types/api";
 import {
   cropVisuals,
+  getCropImageSource,
   getCropIconUri,
   getFriendlyParcelName,
   getFriendlyParcelSubtitle,
   getParcelArea,
-  palette,
   riskTone,
   type CropKey,
 } from "../utils/farmUi";
 
 type Props = NativeStackScreenProps<RootStackParamList, "Decision">;
+
+const palette = {
+  page: "#F3F1E8",
+  card: "#FFFDF8",
+  line: "#D9D3C3",
+  text: "#223127",
+  muted: "#6F7C72",
+  softGreen: "#DCEFD8",
+  green: "#5B8C5A",
+  softBrown: "#E8DCC8",
+  brown: "#8C6745",
+  red: "#E0675C",
+  yellow: "#E5B84C",
+  safe: "#7FAF6A",
+  gray: "#A4AAA1",
+};
 
 const parcelPreviewMap =
   "https://images.unsplash.com/photo-1501004318641-b39e6451bec6?auto=format&fit=crop&w=1400&q=80";
@@ -145,7 +161,7 @@ export function DecisionScreen({ route, navigation }: Props) {
             <ImageBackground source={{ uri: parcelPreviewMap }} style={styles.mapCard} imageStyle={styles.mapCardImage}>
               <View style={styles.mapMarker}>
                 <Image
-                  source={{ uri: getCropIconUri(cropKey, decision?.risk_level === "CRITICAL" ? "wilted" : "normal") }}
+                  source={getCropImageSource(cropKey, decision?.risk_level === "CRITICAL" ? "wilted" : "normal")}
                   style={styles.mapMarkerImage}
                 />
               </View>
@@ -176,7 +192,7 @@ export function DecisionScreen({ route, navigation }: Props) {
               {mockNeighbors.map((neighbor) => (
                 <View key={neighbor.id} style={styles.neighborCard}>
                   <View style={styles.neighborIconWrap}>
-                    <Image source={{ uri: getCropIconUri("wheat") }} style={styles.neighborIconImage} />
+                    <Image source={getCropImageSource("wheat")} style={styles.neighborIconImage} />
                   </View>
                   <View style={styles.neighborCopy}>
                     <Text style={styles.neighborTitle}>{neighbor.label}</Text>
@@ -324,3 +340,6 @@ const styles = StyleSheet.create({
   primaryButton: { minHeight: 56, borderRadius: 18, backgroundColor: "#BFD9B8", alignItems: "center", justifyContent: "center" },
   primaryButtonText: { color: "#35522E", fontSize: 16, fontWeight: "900" },
 });
+
+
+
