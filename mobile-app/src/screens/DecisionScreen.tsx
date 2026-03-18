@@ -20,7 +20,6 @@ import type { DecisionResponse } from "../types/api";
 import {
   cropVisuals,
   getCropImageSource,
-  getCropIconUri,
   getFriendlyParcelName,
   getFriendlyParcelSubtitle,
   getParcelArea,
@@ -125,8 +124,8 @@ export function DecisionScreen({ route, navigation }: Props) {
   const tone = riskTone(decision?.risk_level ?? "UNKNOWN");
   const mockNeighbors = useMemo(
     () => [
-      { id: `${parcelId}-north`, label: "Kuzey komşusu", crop: "Buğday", area: "0.8 ha" },
-      { id: `${parcelId}-east`, label: "Doğu komşusu", crop: "Ayçiçeği", area: "1.1 ha" },
+      { id: `${parcelId}-north`, label: "Kuzey komşusu", crop: "Buğday", cropKey: "wheat" as CropKey, area: "0.8 ha" },
+      { id: `${parcelId}-east`, label: "Doğu komşusu", crop: "Ayçiçeği", cropKey: "sunflower" as CropKey, area: "1.1 ha" },
     ],
     [parcelId],
   );
@@ -139,9 +138,6 @@ export function DecisionScreen({ route, navigation }: Props) {
             <Text style={styles.iconButtonText}>←</Text>
           </Pressable>
           <Text style={styles.pageTitle}>Parsel Detayı ve Ürün Seçimi</Text>
-          <View style={styles.closeGhost}>
-            <Text style={styles.closeGhostText}>×</Text>
-          </View>
         </View>
 
         <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
@@ -171,7 +167,10 @@ export function DecisionScreen({ route, navigation }: Props) {
           <View style={styles.sectionBlock}>
             <Text style={styles.sectionLabel}>Ekilecek Ürün Tipi</Text>
             <View style={styles.selectCard}>
-              <Text style={styles.selectValue}>{cropVisual.label}</Text>
+              <View style={styles.selectValueRow}>
+                <Image source={getCropImageSource(cropKey)} style={styles.selectValueIcon} />
+                <Text style={styles.selectValue}>{cropVisual.label}</Text>
+              </View>
               <Text style={styles.selectArrow}>⌄</Text>
             </View>
           </View>
@@ -192,7 +191,7 @@ export function DecisionScreen({ route, navigation }: Props) {
               {mockNeighbors.map((neighbor) => (
                 <View key={neighbor.id} style={styles.neighborCard}>
                   <View style={styles.neighborIconWrap}>
-                    <Image source={getCropImageSource("wheat")} style={styles.neighborIconImage} />
+                    <Image source={getCropImageSource(neighbor.cropKey)} style={styles.neighborIconImage} />
                   </View>
                   <View style={styles.neighborCopy}>
                     <Text style={styles.neighborTitle}>{neighbor.label}</Text>
@@ -297,6 +296,8 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
   },
+  selectValueRow: { flexDirection: "row", alignItems: "center", gap: 12 },
+  selectValueIcon: { width: 42, height: 42, borderRadius: 14, backgroundColor: "#F7F7F3" },
   selectValue: { color: palette.text, fontSize: 20, fontWeight: "500" },
   selectArrow: { color: palette.green, fontSize: 26, fontWeight: "700" },
   toggleCard: {

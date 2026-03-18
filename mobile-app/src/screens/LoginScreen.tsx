@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+﻿import React, { useState } from "react";
 import { ImageBackground, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { NativeStackScreenProps } from "@react-navigation/native-stack";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -26,7 +26,7 @@ export function LoginScreen({ navigation }: Props) {
       await saveAuthToken(result.access_token);
       navigation.replace("VillageParcels");
     } catch (error) {
-      setErrorText(error instanceof Error ? error.message : "Giriş başarısız");
+      setErrorText(error instanceof Error ? error.message : "Giri\u015f ba\u015far\u0131s\u0131z");
     } finally {
       setLoading(false);
     }
@@ -35,32 +35,18 @@ export function LoginScreen({ navigation }: Props) {
   return (
     <SafeAreaView style={styles.safeArea} edges={["top", "left", "right"]}>
       <View style={styles.page}>
-        <View style={styles.topBar}>
-          <View style={styles.iconGhost}>
-            <Text style={styles.iconGhostText}>≡</Text>
-          </View>
-          <Text style={styles.pageTitle}>Köy Haritası</Text>
-          <View style={styles.closeGhost}>
-            <Text style={styles.closeGhostText}>×</Text>
-          </View>
-        </View>
-
         <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
           <ImageBackground source={{ uri: aerialHero }} style={styles.heroMap} imageStyle={styles.heroMapImage}>
             <View style={styles.heroOverlay} />
-            <View style={styles.searchBar}>
-              <Text style={styles.searchIcon}>⌕</Text>
-              <Text style={styles.searchPlaceholder}>Tarla veya komşu ara</Text>
-            </View>
           </ImageBackground>
 
           <View style={styles.loginCard}>
-            <Text style={styles.cardEyebrow}>Demo girişi</Text>
-            <Text style={styles.cardTitle}>Bilinçli Çiftçi Köyü</Text>
-            <Text style={styles.cardText}>Kendi tarlalarına ulaş, köy genelini incele ve hasat planını takip et.</Text>
+            <Text style={styles.cardEyebrow}>{"Demo Giri\u015fi"}</Text>
+            <Text style={styles.cardTitle}>{"Bilin\u00e7li \u00c7ift\u00e7i K\u00f6y\u00fc"}</Text>
+            <Text style={styles.cardText}>{"Kendi tarlalar\u0131na ula\u015f, k\u00f6y genelini incele ve hasat plan\u0131n\u0131 takip et."}</Text>
 
             <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>Kullanıcı adı</Text>
+              <Text style={styles.inputLabel}>{"Kullan\u0131c\u0131 ad\u0131"}</Text>
               <TextInput
                 value={username}
                 onChangeText={setUsername}
@@ -72,7 +58,7 @@ export function LoginScreen({ navigation }: Props) {
             </View>
 
             <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>Şifre</Text>
+              <Text style={styles.inputLabel}>{"\u015eifre"}</Text>
               <TextInput
                 value={password}
                 onChangeText={setPassword}
@@ -85,13 +71,13 @@ export function LoginScreen({ navigation }: Props) {
 
             {errorText ? (
               <View style={styles.errorBox}>
-                <Text style={styles.errorTitle}>Giriş başarısız</Text>
+                <Text style={styles.errorTitle}>{"Giri\u015f ba\u015far\u0131s\u0131z"}</Text>
                 <Text style={styles.errorText}>{errorText}</Text>
               </View>
             ) : null}
 
             <Pressable style={[styles.primaryButton, loading && styles.primaryButtonDisabled]} onPress={onLogin} disabled={loading}>
-              <Text style={styles.primaryButtonText}>{loading ? "Giriliyor..." : "Kendi tarlama geç"}</Text>
+              <Text style={styles.primaryButtonText}>{loading ? "Giriliyor..." : "Giri\u015f Yap"}</Text>
             </Pressable>
           </View>
 
@@ -102,7 +88,7 @@ export function LoginScreen({ navigation }: Props) {
             </View>
             <View style={styles.metaCard}>
               <Text style={styles.metaLabel}>PANEL</Text>
-              <Text style={styles.metaValue}>Tarlam - Köy Geneli - Hasat</Text>
+              <Text style={styles.metaValue}>{"Tarlam - K\u00f6y Geneli - Hasat"}</Text>
             </View>
           </View>
         </ScrollView>
@@ -120,48 +106,9 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: "#F4F6F2",
   },
-  topBar: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingHorizontal: 18,
-    paddingTop: 8,
-    paddingBottom: 14,
-    backgroundColor: "#FFFFFF",
-  },
-  iconGhost: {
-    width: 52,
-    height: 52,
-    borderRadius: 16,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "#FFFFFF",
-  },
-  iconGhostText: {
-    fontSize: 28,
-    color: "#0E1731",
-    fontWeight: "700",
-  },
-  pageTitle: {
-    color: "#10162F",
-    fontSize: 24,
-    fontWeight: "900",
-  },
-  closeGhost: {
-    width: 52,
-    height: 52,
-    borderRadius: 16,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "#909589",
-  },
-  closeGhostText: {
-    color: "#FFFFFF",
-    fontSize: 28,
-    lineHeight: 30,
-  },
   scrollContent: {
     paddingBottom: 28,
+    paddingTop: 12,
   },
   heroMap: {
     minHeight: 360,
@@ -178,25 +125,6 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(10, 18, 20, 0.1)",
     borderBottomLeftRadius: 34,
     borderBottomRightRadius: 34,
-  },
-  searchBar: {
-    zIndex: 2,
-    flexDirection: "row",
-    alignItems: "center",
-    borderRadius: 24,
-    backgroundColor: "#FFFFFF",
-    paddingHorizontal: 18,
-    minHeight: 58,
-    marginTop: 8,
-  },
-  searchIcon: {
-    color: "#24E75C",
-    fontSize: 24,
-    marginRight: 12,
-  },
-  searchPlaceholder: {
-    color: "#9DA3AA",
-    fontSize: 18,
   },
   loginCard: {
     marginHorizontal: 18,

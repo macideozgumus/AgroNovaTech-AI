@@ -1,4 +1,4 @@
-import React, { useMemo } from "react";
+﻿import React, { useMemo } from "react";
 import { Image, Platform, Pressable, StyleSheet, Text, View } from "react-native";
 
 import type { ParcelItem, RiskLevel } from "../types/api";
@@ -15,6 +15,9 @@ type Props = {
   items: ParcelMapItem[];
   selectedParcelId?: string | null;
   onParcelPress?: (parcelId: string) => void;
+  showVillageBoundary?: boolean;
+  showMineTag?: boolean;
+  preferredFit?: "all" | "mine";
 };
 
 type ParcelFeature = {
@@ -30,6 +33,24 @@ type ParcelFeature = {
 };
 
 const center: [number, number] = [37.8422, 40.1178];
+const villageBoundaryCoordinates: [number, number][] = [
+  [center[0] + 0.0019, center[1] - 0.00225],
+  [center[0] + 0.0019, center[1] + 0.00225],
+  [center[0] - 0.00305, center[1] + 0.00225],
+  [center[0] - 0.00305, center[1] - 0.00225],
+];
+const villageMinePolygon: [number, number][] = [
+  [center[0] + 0.00135, center[1] - 0.0018],
+  [center[0] + 0.00135, center[1] - 0.0002],
+  [center[0] - 0.00245, center[1] - 0.0002],
+  [center[0] - 0.00245, center[1] - 0.0018],
+];
+const villageNeighborPolygon: [number, number][] = [
+  [center[0] + 0.00135, center[1] + 0.0002],
+  [center[0] + 0.00135, center[1] + 0.0018],
+  [center[0] - 0.00245, center[1] + 0.0018],
+  [center[0] - 0.00245, center[1] + 0.0002],
+];
 
 const parcelOffsets = [
   { lat: 0.0011, lng: -0.0014 },
@@ -53,7 +74,13 @@ function buildParcelPolygon(baseLat: number, baseLng: number): [number, number][
   ];
 }
 
-function buildHtml(features: ParcelFeature[], selectedParcelId?: string | null) {
+function buildHtml(
+  features: ParcelFeature[],
+  selectedParcelId?: string | null,
+  showVillageBoundary?: boolean,
+  _showMineTag?: boolean,
+  preferredFit: "all" | "mine" = "all",
+) {
   const payload = JSON.stringify(features);
   const safeSelected = selectedParcelId ?? "";
 
@@ -92,6 +119,8 @@ function buildHtml(features: ParcelFeature[], selectedParcelId?: string | null) 
       <script>
         const features = ${payload};
         const selectedId = ${JSON.stringify(safeSelected)};
+        const showVillageBoundary = ${JSON.stringify(Boolean(showVillageBoundary))};
+        const preferredFit = ${JSON.stringify(preferredFit)};
         const map = L.map("map", { zoomControl: false }).setView([${center[0]}, ${center[1]}], 17);
 
         L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", {
@@ -99,6 +128,17 @@ function buildHtml(features: ParcelFeature[], selectedParcelId?: string | null) 
         }).addTo(map);
 
         const group = L.featureGroup();
+
+        if (showVillageBoundary) {
+          const villagePolygon = L.polygon(${JSON.stringify(villageBoundaryCoordinates)}, {
+            color: "#2B7FFF",
+            weight: 3,
+            fillOpacity: 0.02,
+            dashArray: "10 8"
+          }).addTo(map);
+
+          group.addLayer(villagePolygon);
+        }
 
         features.forEach((feature) => {
           const borderWeight = feature.id === selectedId ? 5 : 3;
@@ -124,7 +164,7 @@ function buildHtml(features: ParcelFeature[], selectedParcelId?: string | null) 
           });
 
           const bounds = polygon.getBounds();
-          const center = bounds.getCenter();
+          const polygonCenter = bounds.getCenter();
           const icon = L.divIcon({
             html: '<img class="parcel-icon" src="' + feature.cropIcon + '" alt="' + feature.name + '" />',
             className: "",
@@ -132,12 +172,20 @@ function buildHtml(features: ParcelFeature[], selectedParcelId?: string | null) 
             iconAnchor: [22, 22]
           });
 
-          L.marker(center, { icon }).addTo(map);
+          L.marker(polygonCenter, { icon }).addTo(map);
           group.addLayer(polygon);
         });
 
         if (features.length > 0) {
-          map.fitBounds(group.getBounds().pad(0.25));
+          const fitFeatures = preferredFit === "mine"
+            ? features.filter((feature) => feature.mine)
+            : features;
+          const activeFeatures = fitFeatures.length > 0 ? fitFeatures : features;
+          const fitGroup = L.featureGroup(
+            activeFeatures.map((feature) => L.polygon(feature.coordinates))
+          );
+
+          map.fitBounds(fitGroup.getBounds().pad(preferredFit === "mine" ? 0.55 : 0.25));
         }
 
         L.control.zoom({ position: "bottomright" }).addTo(map);
@@ -146,37 +194,73 @@ function buildHtml(features: ParcelFeature[], selectedParcelId?: string | null) 
   </html>`;
 }
 
-export function LeafletParcelMap({ items, selectedParcelId, onParcelPress }: Props) {
-  const features = useMemo<ParcelFeature[]>(
-    () =>
-      items.slice(0, parcelOffsets.length).map((item, index) => {
-        const tone = riskTone(item.riskLevel);
-        const offset = parcelOffsets[index];
-        return {
-          id: item.parcel.parcel_id,
-          name: getFriendlyParcelName(item.parcel.parcel_id),
-          riskText: tone.text,
-          color: tone.fieldFill,
-          borderColor: item.isMine ? "#2F7D44" : "#8F7A62",
-          mine: item.isMine,
-          cropKey: item.cropKey,
-          cropIcon:
-            Platform.OS === "web"
-              ? ""
-              : getCropIconUri(item.cropKey, item.riskLevel === "CRITICAL" ? "wilted" : "normal"),
-          coordinates: buildParcelPolygon(center[0] + offset.lat, center[1] + offset.lng),
-        };
-      }),
-    [items],
-  );
+export function LeafletParcelMap({
+  items,
+  selectedParcelId,
+  onParcelPress,
+  showVillageBoundary = false,
+  showMineTag = false,
+  preferredFit = "all",
+}: Props) {
+  const features = useMemo<ParcelFeature[]>(() => {
+    if (showVillageBoundary) {
+      const mineItems = items.filter((item) => item.isMine);
+      const neighborItems = items.filter((item) => !item.isMine);
+      const groups = [
+        { name: "Benim Tarlam", mine: true, coordinates: villageMinePolygon, sourceItems: mineItems },
+        { name: "Diğer Parseller", mine: false, coordinates: villageNeighborPolygon, sourceItems: neighborItems },
+      ] as const;
+
+      return groups
+        .filter((group) => group.sourceItems.length > 0)
+        .map((group) => {
+          const leadItem = group.sourceItems[0];
+          const tone = riskTone(leadItem.riskLevel);
+          return {
+            id: group.mine ? "__group_mine__" : "__group_neighbor__",
+            name: group.name,
+            riskText: tone.text,
+            color: tone.fieldFill,
+            borderColor: group.mine ? "#2F7D44" : "#8F7A62",
+            mine: group.mine,
+            cropKey: leadItem.cropKey,
+            cropIcon:
+              Platform.OS === "web"
+                ? ""
+                : getCropIconUri(leadItem.cropKey, leadItem.riskLevel === "CRITICAL" ? "wilted" : "normal"),
+            coordinates: group.coordinates,
+          };
+        });
+    }
+
+    return items.slice(0, parcelOffsets.length).map((item, index) => {
+      const tone = riskTone(item.riskLevel);
+      const offset = parcelOffsets[index];
+      return {
+        id: item.parcel.parcel_id,
+        name: getFriendlyParcelName(item.parcel.parcel_id),
+        riskText: tone.text,
+        color: tone.fieldFill,
+        borderColor: item.isMine ? "#2F7D44" : "#8F7A62",
+        mine: item.isMine,
+        cropKey: item.cropKey,
+        cropIcon:
+          Platform.OS === "web"
+            ? ""
+            : getCropIconUri(item.cropKey, item.riskLevel === "CRITICAL" ? "wilted" : "normal"),
+        coordinates: buildParcelPolygon(center[0] + offset.lat, center[1] + offset.lng),
+      };
+    });
+  }, [items, showVillageBoundary]);
 
   if (Platform.OS === "web") {
     return (
       <View style={styles.webFallback}>
         <View style={styles.webFallbackOverlay} />
+        {showVillageBoundary ? <View style={styles.webVillageBoundary} /> : null}
         <View style={styles.webFallbackHeader}>
-          <Text style={styles.webFallbackBadge}>Uydu önizleme</Text>
-          <Text style={styles.webFallbackTitle}>Harita görünümü web&#39;de sadeleştirilmiş önizleme ile gösteriliyor.</Text>
+          <Text style={styles.webFallbackBadge}>Uydu Onizleme</Text>
+          <Text style={styles.webFallbackTitle}>Harita gorunumu web&apos;de sadeleştirilmiş önizleme ile gösteriliyor.</Text>
         </View>
         <View style={styles.webParcelGrid}>
           {features.slice(0, 6).map((feature) => (
@@ -191,7 +275,7 @@ export function LeafletParcelMap({ items, selectedParcelId, onParcelPress }: Pro
             >
               <Text style={styles.webParcelTitle}>{feature.name}</Text>
               <Image
-                source={getCropImageSource(feature.cropKey, feature.riskText === "Yüksek Risk" ? "wilted" : "normal")}
+                source={getCropImageSource(feature.cropKey, feature.riskText === "Yuksek Risk" ? "wilted" : "normal")}
                 style={styles.webParcelIcon}
               />
               <Text style={styles.webParcelRisk}>{feature.riskText}</Text>
@@ -206,10 +290,10 @@ export function LeafletParcelMap({ items, selectedParcelId, onParcelPress }: Pro
 
   return (
     <WebView
-      source={{ html: buildHtml(features, selectedParcelId) }}
+      source={{ html: buildHtml(features, selectedParcelId, showVillageBoundary, showMineTag, preferredFit) }}
       originWhitelist={["*"]}
       style={styles.webview}
-      onMessage={(event) => onParcelPress?.(event.nativeEvent.data)}
+      onMessage={(event: { nativeEvent: { data: string } }) => onParcelPress?.(event.nativeEvent.data)}
       javaScriptEnabled
       domStorageEnabled
       scrollEnabled={false}
@@ -220,85 +304,94 @@ export function LeafletParcelMap({ items, selectedParcelId, onParcelPress }: Pro
 const styles = StyleSheet.create({
   webview: {
     flex: 1,
-    backgroundColor: "#dfe6da",
+    backgroundColor: "transparent",
   },
   webFallback: {
-    flex: 1,
-    backgroundColor: "#D7DDD0",
-    padding: 16,
+    minHeight: 300,
+    borderRadius: 28,
+    overflow: "hidden",
+    backgroundColor: "#D9D6C5",
+    padding: 18,
     justifyContent: "space-between",
   },
   webFallbackOverlay: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: "rgba(248, 247, 241, 0.42)",
+    backgroundColor: "rgba(54, 71, 48, 0.08)",
+  },
+  webVillageBoundary: {
+    position: "absolute",
+    top: 16,
+    left: 16,
+    right: 16,
+    bottom: 16,
+    borderRadius: 30,
+    borderWidth: 3,
+    borderColor: "#2B7FFF",
+    borderStyle: "dashed",
   },
   webFallbackHeader: {
-    gap: 8,
+    gap: 6,
   },
   webFallbackBadge: {
     alignSelf: "flex-start",
-    backgroundColor: "rgba(255,255,255,0.88)",
-    color: "#685239",
-    fontSize: 11,
-    fontWeight: "800",
-    paddingHorizontal: 10,
+    paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 999,
-    textTransform: "uppercase",
-    letterSpacing: 0.6,
+    backgroundColor: "rgba(255,255,255,0.85)",
+    color: "#233127",
+    fontWeight: "700",
+    fontSize: 12,
   },
   webFallbackTitle: {
-    color: "#223127",
+    color: "#233127",
     fontSize: 16,
-    fontWeight: "800",
+    fontWeight: "700",
+    maxWidth: 280,
     lineHeight: 22,
   },
   webParcelGrid: {
     flexDirection: "row",
     flexWrap: "wrap",
     gap: 12,
-    justifyContent: "space-between",
   },
   webParcelCard: {
-    width: "48%",
-    minHeight: 122,
+    width: "47%",
     borderRadius: 24,
     padding: 14,
-    justifyContent: "space-between",
-    shadowColor: "#233127",
-    shadowOpacity: 0.12,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 6 },
-    elevation: 3,
+    backgroundColor: "rgba(255,255,255,0.85)",
+    gap: 10,
+    borderWidth: 1,
+    borderColor: "rgba(35,49,39,0.08)",
   },
   webParcelMine: {
-    backgroundColor: "rgba(136, 187, 112, 0.82)",
-    borderWidth: 2,
-    borderColor: "#2F7D44",
+    shadowColor: "#2F7D44",
+    shadowOpacity: 0.12,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 8 },
   },
   webParcelNeighbor: {
-    backgroundColor: "rgba(214, 204, 188, 0.86)",
-    borderWidth: 2,
-    borderColor: "#8F7A62",
-    borderStyle: "dashed",
+    shadowColor: "#8F7A62",
+    shadowOpacity: 0.08,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 6 },
   },
   webParcelSelected: {
-    transform: [{ translateY: -4 }],
+    borderColor: "#2F7D44",
+    borderWidth: 2,
   },
   webParcelTitle: {
-    color: "#1E2D20",
-    fontSize: 14,
-    fontWeight: "800",
+    fontSize: 16,
+    fontWeight: "700",
+    color: "#233127",
   },
   webParcelIcon: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: "rgba(255,255,255,0.94)",
+    width: 52,
+    height: 52,
+    borderRadius: 18,
   },
   webParcelRisk: {
-    color: "#304232",
-    fontSize: 12,
-    fontWeight: "700",
+    fontSize: 13,
+    color: "#4E5E4B",
+    fontWeight: "600",
   },
 });

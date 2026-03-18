@@ -11,7 +11,7 @@ export type RootStackParamList = {
   Login: undefined;
   VillageParcels: undefined;
   Decision: { parcelId: string; season: string };
-  ScenarioBuilder: { focusParcelId?: string } | undefined;
+  ScenarioBuilder: { focusParcelId?: string; scenarioId?: string } | undefined;
 };
 
 const Stack = createNativeStackNavigator<RootStackParamList>();

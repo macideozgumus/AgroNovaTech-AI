@@ -5,7 +5,7 @@ services:
     build: .
     container_name: agronova-backend
     ports:
-      - "8000:8000"
+      - "8001:8000"
     volumes:
       - ./backend/app/agronova.db:/app/backend/app/agronova.db
     environment:

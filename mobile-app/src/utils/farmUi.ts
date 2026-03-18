@@ -47,20 +47,20 @@ export type CropKey = keyof typeof cropVisuals;
 
 const cropImageSources: Record<CropKey, { normal: ImageSourcePropType; wilted: ImageSourcePropType }> = {
   corn: {
-    normal: require("../../assets/crops/corn.png"),
-    wilted: require("../../assets/crops/corn-wilted.png"),
+    normal: require("../../assets/crops/misir.jpg"),
+    wilted: require("../../assets/crops/misir.jpg"),
   },
   sunflower: {
-    normal: require("../../assets/crops/sunflower.png"),
-    wilted: require("../../assets/crops/sunflower-wilted.png"),
+    normal: require("../../assets/crops/aycicek.jpg"),
+    wilted: require("../../assets/crops/aycicek.jpg"),
   },
   wheat: {
-    normal: require("../../assets/crops/wheat.png"),
-    wilted: require("../../assets/crops/wheat-wilted.png"),
+    normal: require("../../assets/crops/bugday.jpg"),
+    wilted: require("../../assets/crops/bugday.jpg"),
   },
   barley: {
-    normal: require("../../assets/crops/barley.png"),
-    wilted: require("../../assets/crops/barley-wilted.png"),
+    normal: require("../../assets/crops/arpa.jpg"),
+    wilted: require("../../assets/crops/arpa.jpg"),
   },
 };
 

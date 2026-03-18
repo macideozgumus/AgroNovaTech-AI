@@ -22,7 +22,6 @@ import type { DecisionResponse, ParcelItem, RiskLevel } from "../types/api";
 import {
   cropVisuals,
   getCropImageSource,
-  getCropIconUri,
   getFriendlyParcelName,
   getFriendlyParcelSubtitle,
   getParcelArea,
@@ -47,7 +46,7 @@ const palette = {
   safe: "#7FAF6A",
   gray: "#A4AAA1",
 };
-type DashboardMode = "MY_FIELDS" | "VILLAGE" | "HARVEST" | "SCENARIOS";
+type DashboardMode = "MY_FIELDS" | "VILLAGE" | "HARVEST" | "SCENARIOS" | "SUMMARY" | "GUIDE" | "NEIGHBORS";
 type OwnershipFilter = "ALL" | "MINE" | "NEIGHBOR";
 type DecisionMap = Record<string, DecisionResponse | undefined>;
 type ScenarioCard = {
@@ -56,6 +55,11 @@ type ScenarioCard = {
   title: string;
   report: string;
 };
+type ParcelDraft = {
+  cropKey: CropKey;
+  neighborEnabled: boolean;
+};
+type VillageGroupKey = "MINE" | "NEIGHBOR";
 
 const DEFAULT_SEASON = "2026_Spring";
 
@@ -66,11 +70,53 @@ const cropOptions: { key: CropKey; label: string }[] = [
   { key: "barley", label: "Arpa" },
 ];
 
+const cropGuideContent: Record<CropKey, { title: string; summary: string; bullets: string[] }> = {
+  corn: {
+    title: "Mısır Genel Bilgileri",
+    summary: "Mısır yüksek enerji isteyen bir ürün. Su ve komşu baskısı birlikte değerlendirilmelidir.",
+    bullets: [
+      "Sıcak dönemde verim potansiyeli yüksektir.",
+      "Yoğun tek ürün deseninde hastalık baskısı artabilir.",
+      "Sulama ve besleme planı güçlü olmalıdır.",
+    ],
+  },
+  sunflower: {
+    title: "Ayçiçeği Genel Bilgileri",
+    summary: "Ayçiçeği daha dengeli rotasyon planlarında güçlü bir alternatiftir.",
+    bullets: [
+      "Yağlık üretim için iyi bir tercihtir.",
+      "Komşu ürün çeşitliliğine katkı sağlar.",
+      "Toprak ve iklim dengesi uygunsa stabil sonuç verir.",
+    ],
+  },
+  wheat: {
+    title: "Buğday Genel Bilgileri",
+    summary: "Buğday serin dönem planlarında daha istikrarlı ve düşük riskli görünür.",
+    bullets: [
+      "Erken planlama ile güçlü verim sağlar.",
+      "Köy genelinde dengeli dağılıma destek olur.",
+      "Komşu baskısı mısıra göre daha kontrollüdür.",
+    ],
+  },
+  barley: {
+    title: "Arpa Genel Bilgileri",
+    summary: "Arpa hızlı çevrimli ve serin dönem koşullarına uygun bir alternatif üründür.",
+    bullets: [
+      "Riskli parsellerde yükü hafifletebilir.",
+      "Rotasyon senaryolarında faydalı olabilir.",
+      "Toprak kullanım dengesini korumaya yardımcı olur.",
+    ],
+  },
+};
+
 const modeMeta: Record<DashboardMode, { eyebrow: string; title: string }> = {
   MY_FIELDS: { eyebrow: "AgroNova", title: "Ana Sayfa" },
   VILLAGE: { eyebrow: "Köy Analizi", title: "Köy Geneli" },
   SCENARIOS: { eyebrow: "Senaryo Merkezi", title: "Kaydedilen Senaryolar" },
   HARVEST: { eyebrow: "Takvim", title: "Hasat Planı" },
+  SUMMARY: { eyebrow: "Hızlı Bakış", title: "Hızlı Özet" },
+  GUIDE: { eyebrow: "Destek", title: "Kullanım Kılavuzu" },
+  NEIGHBORS: { eyebrow: "Topluluk", title: "Komşu Kullanıcılar" },
 };
 
 export function VillageParcelsScreen({ navigation }: Props) {
@@ -83,9 +129,17 @@ export function VillageParcelsScreen({ navigation }: Props) {
   const [query, setQuery] = useState("");
   const [ownershipFilter, setOwnershipFilter] = useState<OwnershipFilter>("ALL");
   const [selectedParcelId, setSelectedParcelId] = useState<string | null>(null);
+  const [villageMapFit, setVillageMapFit] = useState<"all" | "mine">("all");
   const [scenarioCrop, setScenarioCrop] = useState<CropKey>("corn");
   const [scenarioCards] = useState<Record<string, ScenarioCard[]>>({});
   const [savedScenarios, setSavedScenarios] = useState<SavedScenario[]>([]);
+  const [healthDetailOpen, setHealthDetailOpen] = useState(false);
+  const [parcelDrafts, setParcelDrafts] = useState<Record<string, ParcelDraft>>({});
+  const [parcelDetailOpen, setParcelDetailOpen] = useState(false);
+  const [cropGuideOpen, setCropGuideOpen] = useState(false);
+  const [cropGuideCrop, setCropGuideCrop] = useState<CropKey>("corn");
+  const [villageGroupSheetOpen, setVillageGroupSheetOpen] = useState(false);
+  const [selectedVillageGroup, setSelectedVillageGroup] = useState<VillageGroupKey>("MINE");
 
   useEffect(() => {
     let mounted = true;
@@ -119,6 +173,14 @@ export function VillageParcelsScreen({ navigation }: Props) {
           setParcels(data.parcels);
           setDecisions(Object.fromEntries(decisionEntries));
           setSelectedParcelId(data.parcels[0]?.parcel_id ?? null);
+          setParcelDrafts(
+            Object.fromEntries(
+              data.parcels.map((parcel) => [
+                parcel.parcel_id,
+                { cropKey: parcel.planned_crop as CropKey, neighborEnabled: true },
+              ]),
+            ),
+          );
           setErrorText(null);
         }
       } catch (error) {
@@ -195,9 +257,15 @@ export function VillageParcelsScreen({ navigation }: Props) {
   const selectedIsMine = selectedEntry?.isMine ?? false;
   const selectedLevel = selectedParcel ? decisionLevel(selectedParcel.parcel_id) : "UNKNOWN";
   const selectedTone = riskTone(selectedLevel);
-  const selectedCropKey = (selectedParcel?.planned_crop ?? "wheat") as CropKey;
+  const selectedCropKey = selectedParcel
+    ? parcelDrafts[selectedParcel.parcel_id]?.cropKey ?? (selectedParcel.planned_crop as CropKey)
+    : "wheat";
+  const selectedNeighborEnabled = selectedParcel
+    ? parcelDrafts[selectedParcel.parcel_id]?.neighborEnabled ?? true
+    : true;
   const selectedVisual = cropVisuals[selectedCropKey] ?? cropVisuals.wheat;
   const selectedScenarios = selectedParcel ? scenarioCards[selectedParcel.parcel_id] ?? [] : [];
+  const activeCropGuide = cropGuideContent[cropGuideCrop];
 
   const summary = useMemo(
     () => ({
@@ -210,6 +278,9 @@ export function VillageParcelsScreen({ navigation }: Props) {
 
   const myParcels = filteredParcels.filter((item) => item.isMine);
   const neighborParcels = filteredParcels.filter((item) => !item.isMine);
+  const villageGroupParcels = selectedVillageGroup === "MINE"
+    ? parcelsWithOwnership.filter((item) => item.isMine)
+    : parcelsWithOwnership.filter((item) => !item.isMine);
   const moisture = Math.max(52, 72 - summary.critical * 4);
   const airQuality = Math.max(11, 18 - summary.critical * 2);
   const waterLevel = Math.max(61, 84 - summary.neighbor);
@@ -219,6 +290,66 @@ export function VillageParcelsScreen({ navigation }: Props) {
       ? "Bugün riskli alanları gözden geçirmek ve senaryo üretmek için uygun."
       : "Bugün hava çiftçilik planlaması ve arazi kontrolü için ideal.";
   const villageStatus = summary.critical === 0 ? "Mükemmel" : summary.critical < 3 ? "Dengeli" : "İzlenmeli";
+  const villageHealthTitle = "Sakarya / Bilinçli Çiftçi Köyü Sağlığı";
+  const airQualitySummary =
+    airQuality <= 20
+      ? "Hava temiz ve açık. Bugün tarlada çalışma, gözlem ve ilaçlama planı için rahat bir gün."
+      : airQuality <= 35
+        ? "Hava genel olarak iyi. Açık alanda çalışmak için uygun, hassas parsellerde kısa kontrol önerilir."
+        : "Hava değişken görünüyor. Uzun süreli saha çalışmasında koruyucu planlama yapılmalı.";
+  const airQualityDisplay = `${airQuality} / 100`;
+  const waterLevelSummary =
+    "Bu değer şu an gerçek sensör verisinden gelmiyor. Demo ekranda komşu parsel yoğunluğuna göre türetilmiş örnek bir su erişim göstergesi olarak gösteriliyor.";
+  const waterLevelFormula = "Su seviyesi = max(61, 84 - komşu parsel sayısı)";
+  const annualHarvestRows = [
+    { crop: "Mısır", cropKey: "corn" as CropKey, amount: "128 ton", share: "%31" },
+    { crop: "Ayçiçeği", cropKey: "sunflower" as CropKey, amount: "94 ton", share: "%23" },
+    { crop: "Buğday", cropKey: "wheat" as CropKey, amount: "116 ton", share: "%28" },
+    { crop: "Arpa", cropKey: "barley" as CropKey, amount: "73 ton", share: "%18" },
+  ];
+  const monthlyVillageRows = [
+    { month: "Ocak 2026", note: "Toprak dinlenme ve bakım dönemi", value: "Sulama hazırlığı %68" },
+    { month: "Şubat 2026", note: "Girdi planı güncellendi", value: "Tohum tedariki 42 paket" },
+    { month: "Mart 2026", note: "İlkbahar ekim takvimi başladı", value: "Aktif parsel 11 / 16" },
+    { month: "Nisan 2026", note: "Komşu etki analizi yoğunlaşıyor", value: "Riskli parsel 3 adet" },
+  ];
+  const healthSources = [
+    "AgroNova demo köy kayıtları ve parsel plan verileri",
+    "Karar motorunda üretilen risk özeti ve sezonluk dağılım çıktıları",
+    "Örnek hava ve su ölçümleri: demo gösterim amaçlı kurgulanmış referans veri",
+  ];
+  const openMyFields = () => {
+    setMode("MY_FIELDS");
+    setOwnershipFilter("MINE");
+    setVillageMapFit("mine");
+    const firstMine = parcelsWithOwnership.find((item) => item.isMine)?.parcel.parcel_id ?? selectedParcelId;
+    setSelectedParcelId(firstMine);
+  };
+  const openNeighborFields = () => {
+    setMode("MY_FIELDS");
+    setOwnershipFilter("NEIGHBOR");
+    setVillageMapFit("all");
+    const firstNeighbor = parcelsWithOwnership.find((item) => !item.isMine)?.parcel.parcel_id ?? selectedParcelId;
+    setSelectedParcelId(firstNeighbor);
+  };
+  const openVillageOverview = () => {
+    setMode("VILLAGE");
+    setOwnershipFilter("ALL");
+    setVillageMapFit("all");
+  };
+  const openCriticalParcels = () => {
+    setMode("VILLAGE");
+    setOwnershipFilter("ALL");
+    setVillageMapFit("all");
+  };
+  const openParcelDetail = (parcelId: string) => {
+    setSelectedParcelId(parcelId);
+    setParcelDetailOpen(true);
+  };
+  const openVillageGroupSheet = (group: VillageGroupKey) => {
+    setSelectedVillageGroup(group);
+    setVillageGroupSheetOpen(true);
+  };
   const openScenarioBuilder = () =>
     navigation.navigate("ScenarioBuilder", { focusParcelId: selectedParcel?.parcel_id ?? undefined });
 
@@ -244,7 +375,12 @@ export function VillageParcelsScreen({ navigation }: Props) {
           <Pressable
             key={scenario.id}
             style={styles.savedScenarioCard}
-            onPress={() => navigation.navigate("ScenarioBuilder", { focusParcelId: scenario.parcels[0]?.parcelId })}
+            onPress={() =>
+              navigation.navigate("ScenarioBuilder", {
+                focusParcelId: scenario.parcels[0]?.parcelId,
+                scenarioId: scenario.id,
+              })
+            }
           >
             <View style={styles.savedScenarioHeader}>
               <Text style={styles.savedScenarioTitle}>{scenario.name}</Text>
@@ -255,6 +391,27 @@ export function VillageParcelsScreen({ navigation }: Props) {
           </Pressable>
         ))
       )}
+    </View>
+  );
+
+  const renderQuickSummary = () => (
+    <View style={styles.sectionCard}>
+      <Text style={styles.sectionTitle}>Hızlı Özet</Text>
+      <Text style={styles.sectionSubtitle}>Köy ve parsel akışının özetini tek panelde hızlıca görebilirsin.</Text>
+      <View style={styles.summaryRows}>
+        <Pressable style={styles.summaryLine} onPress={openMyFields}>
+          <Text style={styles.summaryLabel}>Tarlalarım</Text>
+          <Text style={styles.summaryValue}>{myParcels.length}</Text>
+        </Pressable>
+        <Pressable style={styles.summaryLine} onPress={openNeighborFields}>
+          <Text style={styles.summaryLabel}>Komşu tarlalar</Text>
+          <Text style={styles.summaryValue}>{neighborParcels.length}</Text>
+        </Pressable>
+        <Pressable style={styles.summaryLine} onPress={openCriticalParcels}>
+          <Text style={styles.summaryLabel}>Kritik parseller</Text>
+          <Text style={styles.summaryValue}>{summary.critical}</Text>
+        </Pressable>
+      </View>
     </View>
   );
 
@@ -285,13 +442,14 @@ export function VillageParcelsScreen({ navigation }: Props) {
         </View>
       </View>
 
-      <View style={styles.healthCard}>
+      <Pressable style={styles.healthCard} onPress={() => setHealthDetailOpen(true)}>
         <View style={styles.healthHeader}>
           <Text style={styles.healthTitle}>Köy Sağlığı</Text>
           <View style={styles.healthBadge}>
             <Text style={styles.healthBadgeText}>Durum: {villageStatus}</Text>
           </View>
         </View>
+        <Text style={styles.healthSubtitle}>{villageHealthTitle}</Text>
         <View style={styles.healthMetrics}>
           <View style={styles.healthMetric}>
             <Text style={styles.healthMetricLabel}>Toprak Nem</Text>
@@ -300,15 +458,18 @@ export function VillageParcelsScreen({ navigation }: Props) {
           <View style={styles.healthDivider} />
           <View style={styles.healthMetric}>
             <Text style={styles.healthMetricLabel}>Hava Kalitesi</Text>
-            <Text style={styles.healthMetricValue}>AQI {airQuality}</Text>
+            <Text style={styles.healthMetricValue}>{airQualityDisplay}</Text>
+            <Text style={styles.healthMetricCaption}>Bugün saha çalışması için {airQuality <= 20 ? "oldukça uygun" : "genel olarak uygun"}</Text>
           </View>
           <View style={styles.healthDivider} />
           <View style={styles.healthMetric}>
             <Text style={styles.healthMetricLabel}>Su Seviyesi</Text>
             <Text style={styles.healthMetricValue}>%{waterLevel}</Text>
+            <Text style={styles.healthMetricCaption}>Sulama hattı ve depo doluluğu birlikte değerlendirildi</Text>
           </View>
         </View>
-      </View>
+        <Text style={styles.healthHint}>Detaylı köy verisini görmek için bu karta dokun.</Text>
+      </Pressable>
 
       <View style={styles.heroShell}>
         <View style={styles.heroTopRow}>
@@ -334,20 +495,25 @@ export function VillageParcelsScreen({ navigation }: Props) {
 
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterRow}>
             {[
-              { key: "ALL" as const, label: "Tüm Parseller" },
-              { key: "MINE" as const, label: "Tarlalarım" },
-              { key: "NEIGHBOR" as const, label: "Komşu Tarlalar" },
+              { key: "MINE" as const, label: "Kendi Tarlam", onPress: openMyFields },
+              { key: "NEIGHBOR" as const, label: "Komşu Tarlalar", onPress: openNeighborFields },
             ].map((item) => (
               <Pressable
                 key={item.key}
-                style={[styles.filterChip, ownershipFilter === item.key && styles.filterChipActive]}
-                onPress={() => setOwnershipFilter(item.key)}
+                style={[styles.filterChip, mode === "MY_FIELDS" && ownershipFilter === item.key && styles.filterChipActive]}
+                onPress={item.onPress}
             >
-              <Text style={[styles.filterChipText, ownershipFilter === item.key && styles.filterChipTextActive]}>
+              <Text style={[styles.filterChipText, mode === "MY_FIELDS" && ownershipFilter === item.key && styles.filterChipTextActive]}>
                 {item.label}
                 </Text>
               </Pressable>
             ))}
+            <Pressable
+              style={[styles.filterChip, mode === "VILLAGE" && styles.filterChipActive]}
+              onPress={openVillageOverview}
+            >
+              <Text style={[styles.filterChipText, mode === "VILLAGE" && styles.filterChipTextActive]}>Köy Geneli</Text>
+            </Pressable>
             <Pressable
               style={styles.scenarioInlineButton}
               onPress={openScenarioBuilder}
@@ -366,10 +532,10 @@ export function VillageParcelsScreen({ navigation }: Props) {
                 parcel: item.parcel,
                 riskLevel: decisionLevel(item.parcel.parcel_id),
                 isMine: item.isMine,
-                cropKey: item.parcel.planned_crop as CropKey,
+                cropKey: parcelDrafts[item.parcel.parcel_id]?.cropKey ?? (item.parcel.planned_crop as CropKey),
               }))}
               selectedParcelId={selectedParcel?.parcel_id}
-              onParcelPress={setSelectedParcelId}
+              onParcelPress={openParcelDetail}
             />
           </View>
         </View>
@@ -458,19 +624,8 @@ export function VillageParcelsScreen({ navigation }: Props) {
             </View>
 
             <View style={styles.primaryActionsRow}>
-              <Pressable
-                style={styles.primaryButton}
-                onPress={() =>
-                  navigation.navigate("Decision", {
-                    parcelId: selectedParcel.parcel_id,
-                    season: DEFAULT_SEASON,
-                  })
-                }
-              >
+              <Pressable style={styles.primaryButton} onPress={() => openParcelDetail(selectedParcel.parcel_id)}>
                 <Text style={styles.primaryButtonText}>Parsel Detayı</Text>
-              </Pressable>
-              <Pressable style={styles.secondaryButton} onPress={openScenarioBuilder}>
-                <Text style={styles.secondaryButtonText}>Araştırma Senaryosu</Text>
               </Pressable>
             </View>
           </>
@@ -478,7 +633,12 @@ export function VillageParcelsScreen({ navigation }: Props) {
       </View>
 
       <View style={styles.sectionCard}>
-        <Text style={styles.sectionTitle}>Kolektif Planlar</Text>
+        <View style={styles.sectionHeader}>
+          <Text style={styles.sectionTitle}>Kolektif Planlar</Text>
+          <Pressable style={styles.secondaryButtonCompact} onPress={openScenarioBuilder}>
+            <Text style={styles.secondaryButtonCompactText}>Araştırma Senaryosu</Text>
+          </Pressable>
+        </View>
         <Text style={styles.sectionSubtitle}>Senaryo ekranında farklı ürün kombinasyonları oluştur, risk açıklamalarını incele ve kaydet.</Text>
 
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.cropPickerRow}>
@@ -486,7 +646,11 @@ export function VillageParcelsScreen({ navigation }: Props) {
             <Pressable
               key={option.key}
               style={[styles.cropOptionCard, scenarioCrop === option.key && styles.cropOptionCardActive]}
-              onPress={() => setScenarioCrop(option.key)}
+              onPress={() => {
+                setScenarioCrop(option.key);
+                setCropGuideCrop(option.key);
+                setCropGuideOpen(true);
+              }}
             >
               <Image source={getCropImageSource(option.key)} style={styles.cropOptionImage} />
               <Text style={styles.cropOptionLabel}>{option.label}</Text>
@@ -503,31 +667,154 @@ export function VillageParcelsScreen({ navigation }: Props) {
           selectedScenarios.map((scenario) => (
             <View key={scenario.id} style={styles.scenarioCard}>
               <Text style={styles.scenarioTitle}>{scenario.title}</Text>
-              <Text style={styles.scenarioCrop}>{cropVisuals[scenario.crop].label}</Text>
+              <View style={styles.scenarioCropRow}>
+                <Image source={getCropImageSource(scenario.crop)} style={styles.scenarioCropIcon} />
+                <Text style={styles.scenarioCrop}>{cropVisuals[scenario.crop].label}</Text>
+              </View>
               <Text style={styles.scenarioReport}>{scenario.report}</Text>
             </View>
           ))
         )}
       </View>
+    </>
+  );
 
+  const renderVillageOverview = () => (
+    <>
       <View style={styles.sectionCard}>
-        <Text style={styles.sectionTitle}>Hızlı Özet</Text>
-        <View style={styles.summaryRows}>
-          <View style={styles.summaryLine}>
-            <Text style={styles.summaryLabel}>Tarlalarım</Text>
-            <Text style={styles.summaryValue}>{myParcels.length}</Text>
+        <View style={styles.villageHeaderRow}>
+          <View style={styles.villageHeaderCopy}>
+            <Text style={styles.sectionTitle}>Köy Geneli Haritası</Text>
+            <Text style={styles.sectionSubtitle}>
+              Köy sınırı mavi çizgiyle belirtilir. Tüm parseller risk rengine göre gösterilir; benim tarlalarım yeşil tonla ayrışır.
+            </Text>
           </View>
-          <View style={styles.summaryLine}>
-            <Text style={styles.summaryLabel}>Komşu tarlalar</Text>
-            <Text style={styles.summaryValue}>{neighborParcels.length}</Text>
+          <Pressable
+            style={styles.villageMineButton}
+            onPress={() => setVillageMapFit("mine")}
+          >
+            <Text style={styles.villageMineButtonText}>Benim Tarlam</Text>
+          </Pressable>
+        </View>
+
+        <View style={styles.villageMapShell}>
+          <LeafletParcelMap
+            items={parcelsWithOwnership.map((item) => ({
+              parcel: item.parcel,
+              riskLevel: decisionLevel(item.parcel.parcel_id),
+              isMine: item.isMine,
+              cropKey: parcelDrafts[item.parcel.parcel_id]?.cropKey ?? (item.parcel.planned_crop as CropKey),
+            }))}
+            selectedParcelId={selectedParcel?.parcel_id}
+            onParcelPress={(id) => {
+              if (id === "__group_mine__") {
+                openVillageGroupSheet("MINE");
+                return;
+              }
+
+              if (id === "__group_neighbor__") {
+                openVillageGroupSheet("NEIGHBOR");
+                return;
+              }
+
+              openParcelDetail(id);
+            }}
+            showVillageBoundary
+            preferredFit={villageMapFit}
+          />
+        </View>
+
+        <View style={styles.legendRow}>
+          <View style={styles.legendItem}>
+            <View style={styles.legendBoundary} />
+            <Text style={styles.legendText}>Köy sınırı</Text>
           </View>
-          <View style={styles.summaryLine}>
-            <Text style={styles.summaryLabel}>Seçili parsel</Text>
-            <Text style={styles.summaryValue}>{selectedParcel ? getFriendlyParcelName(selectedParcel.parcel_id) : "-"}</Text>
+          <View style={styles.legendItem}>
+            <View style={styles.legendSwatchMine} />
+            <Text style={styles.legendText}>Benim tarlam</Text>
+          </View>
+          <View style={styles.legendItem}>
+            <View style={styles.legendSwatchNeighbor} />
+            <Text style={styles.legendText}>Diğer parseller</Text>
           </View>
         </View>
       </View>
+
+      <View style={styles.sectionCard}>
+        <Text style={styles.sectionTitle}>Parsel Bazlı Risk Listesi</Text>
+        <Text style={styles.sectionSubtitle}>Aşağıdaki listeden bir parsele dokunarak detay ekranına geçebilirsin.</Text>
+        <View style={styles.summaryRows}>
+          {parcelsWithOwnership.map((item) => {
+            const tone = riskTone(decisionLevel(item.parcel.parcel_id));
+            return (
+              <Pressable
+                key={item.parcel.parcel_id}
+                style={styles.villageParcelRow}
+                onPress={() => openParcelDetail(item.parcel.parcel_id)}
+              >
+                <View style={styles.villageParcelLead}>
+                  <Image source={getCropImageSource(item.parcel.planned_crop as CropKey)} style={styles.villageParcelIcon} />
+                  <View>
+                    <Text style={styles.villageParcelTitle}>{getFriendlyParcelName(item.parcel.parcel_id)}</Text>
+                    <Text style={styles.villageParcelSubtitle}>
+                      {item.isMine ? "Benim tarlam" : "Köy parseli"} • {getFriendlyParcelSubtitle(item.parcel.parcel_id)}
+                    </Text>
+                  </View>
+                </View>
+                <View style={[styles.riskBadge, { backgroundColor: tone.badgeBg }]}>
+                  <Text style={[styles.riskBadgeText, { color: tone.badgeFg }]}>{tone.text}</Text>
+                </View>
+              </Pressable>
+            );
+          })}
+        </View>
+      </View>
     </>
+  );
+
+  const renderUsageGuide = () => (
+    <View style={styles.sectionCard}>
+      <Text style={styles.sectionTitle}>Kullanım Kılavuzu</Text>
+      <Text style={styles.sectionSubtitle}>Uygulamadaki temel akışları bu panelden hızlıca görebilirsin.</Text>
+      <View style={styles.summaryRows}>
+        {[
+          "1. Kendi tarlam veya komşu tarlalar görünümünü seç.",
+          "2. Bir parsele dokunup aşağıdan açılan parsel seçim ekranını kullan.",
+          "3. Ürün tipini ve komşu etkileşimini değiştir.",
+          "4. Kolektif Planlar kısmından ürün rehberi ve araştırma senaryosuna geç.",
+          "5. Kaydedilen senaryoları daha sonra tekrar açıp incele.",
+        ].map((item) => (
+          <View key={item} style={styles.guideRow}>
+            <Text style={styles.guideRowText}>{item}</Text>
+          </View>
+        ))}
+      </View>
+    </View>
+  );
+
+  const renderNeighborUsers = () => (
+    <View style={styles.sectionCard}>
+      <Text style={styles.sectionTitle}>Komşu Kullanıcılar</Text>
+      <Text style={styles.sectionSubtitle}>Yakındaki üreticileri ve aktif ürün planlarını burada görebilirsin.</Text>
+      <View style={styles.summaryRows}>
+        {[
+          { name: "Ahmet Kaya", area: "A Blok çevresi", crop: "Buğday", status: "Aktif" },
+          { name: "Zeynep Demir", area: "B Blok doğusu", crop: "Ayçiçeği", status: "İzlemede" },
+          { name: "Mehmet Arı", area: "Kuzey sınır hattı", crop: "Arpa", status: "Aktif" },
+        ].map((user) => (
+          <View key={user.name} style={styles.neighborUserCard}>
+            <View>
+              <Text style={styles.neighborUserName}>{user.name}</Text>
+              <Text style={styles.neighborUserMeta}>{user.area}</Text>
+            </View>
+            <View style={styles.neighborUserRight}>
+              <Text style={styles.neighborUserCrop}>{user.crop}</Text>
+              <Text style={styles.neighborUserStatus}>{user.status}</Text>
+            </View>
+          </View>
+        ))}
+      </View>
+    </View>
   );
 
   const renderPlaceholder = (title: string, body: string) => (
@@ -548,21 +835,21 @@ export function VillageParcelsScreen({ navigation }: Props) {
             <Text style={styles.headerEyebrow}>{modeMeta[mode].eyebrow}</Text>
             <Text style={styles.headerTitle}>{modeMeta[mode].title}</Text>
           </View>
-          <View style={styles.headerGhost}>
-            <Text style={styles.headerGhostText}>✕</Text>
-          </View>
         </View>
 
         <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.content}>
           {mode === "MY_FIELDS"
             ? renderProfessionalHome()
             : mode === "VILLAGE"
-              ? renderPlaceholder(
-                  "Köy geneli ikinci adım",
-                  "Bu ekranı bir sonraki turda aynı profesyonel tasarım diliyle, toplu harita ve istatistik mantığıyla kuracağız.",
-                )
+              ? renderVillageOverview()
+              : mode === "GUIDE"
+                ? renderUsageGuide()
+              : mode === "NEIGHBORS"
+                ? renderNeighborUsers()
               : mode === "SCENARIOS"
                 ? renderSavedScenarios()
+              : mode === "SUMMARY"
+                ? renderQuickSummary()
               : renderPlaceholder(
                   "Hasat planı ikinci adım",
                   "Ana sayfayı profesyonel seviyeye aldıktan sonra hasat planını aynı görsel sistemle ilerleteceğim.",
@@ -577,6 +864,9 @@ export function VillageParcelsScreen({ navigation }: Props) {
             {[
               { key: "MY_FIELDS" as const, label: "Kendi Tarlam" },
               { key: "VILLAGE" as const, label: "Köy Geneli" },
+              { key: "NEIGHBORS" as const, label: "Komşu Kullanıcılar" },
+              { key: "GUIDE" as const, label: "Kullanım Kılavuzu" },
+              { key: "SUMMARY" as const, label: "Hızlı Özet" },
               { key: "SCENARIOS" as const, label: "Kaydedilen Senaryolar" },
               { key: "HARVEST" as const, label: "Hasat Planı" },
             ].map((item) => (
@@ -584,7 +874,11 @@ export function VillageParcelsScreen({ navigation }: Props) {
                 key={item.key}
                 style={[styles.drawerItem, mode === item.key && styles.drawerItemActive]}
                 onPress={() => {
-                  setMode(item.key);
+                  if (item.key === "VILLAGE") {
+                    openVillageOverview();
+                  } else {
+                    setMode(item.key);
+                  }
                   setDrawerOpen(false);
                 }}
               >
@@ -593,6 +887,285 @@ export function VillageParcelsScreen({ navigation }: Props) {
             ))}
           </Pressable>
         </Pressable>
+      </Modal>
+
+      <Modal visible={parcelDetailOpen} transparent animationType="slide" onRequestClose={() => setParcelDetailOpen(false)}>
+        <Pressable style={styles.bottomSheetBackdrop} onPress={() => setParcelDetailOpen(false)}>
+          <Pressable style={styles.bottomSheet} onPress={() => undefined}>
+            {selectedParcel ? (
+              <>
+                <View style={styles.bottomSheetHandle} />
+                <View style={styles.bottomSheetHeader}>
+                  <View style={styles.bottomSheetHeaderCopy}>
+                    <Text style={styles.detailEyebrow}>Parsel Seçimi</Text>
+                    <Text style={styles.bottomSheetTitle}>{getFriendlyParcelName(selectedParcel.parcel_id)}</Text>
+                    <Text style={styles.bottomSheetSubtitle}>
+                      {getFriendlyParcelSubtitle(selectedParcel.parcel_id)} • {getParcelArea(selectedParcel.parcel_id)}
+                    </Text>
+                  </View>
+                  <View style={[styles.riskBadge, { backgroundColor: selectedTone.badgeBg }]}>
+                    <Text style={[styles.riskBadgeText, { color: selectedTone.badgeFg }]}>{selectedTone.text}</Text>
+                  </View>
+                </View>
+
+                <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.bottomSheetContent}>
+                  <View style={styles.bottomMediaCard}>
+                    <View style={styles.selectionIconCircle}>
+                      <Image source={getCropImageSource(selectedCropKey)} style={styles.selectionLeadIcon} />
+                    </View>
+                    <View style={styles.bottomMediaCopy}>
+                      <Text style={styles.bottomMediaTitle}>Ekilecek Ürün Tipi</Text>
+                      <Text style={styles.bottomMediaText}>
+                        Kullanıcı bu parsel için ürünü doğrudan değiştirebilir. Seçim anında parsel kartına yansır.
+                      </Text>
+                    </View>
+                  </View>
+
+                  <View style={styles.bottomSection}>
+                    <Text style={styles.bottomSectionTitle}>Ürün Seç</Text>
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.cropPickerRow}>
+                      {cropOptions.map((option) => (
+                        <Pressable
+                          key={`${selectedParcel.parcel_id}-${option.key}`}
+                          style={[
+                            styles.cropOptionCard,
+                            selectedCropKey === option.key && styles.cropOptionCardActive,
+                          ]}
+                          onPress={() =>
+                            setParcelDrafts((current) => ({
+                              ...current,
+                              [selectedParcel.parcel_id]: {
+                                cropKey: option.key,
+                                neighborEnabled: current[selectedParcel.parcel_id]?.neighborEnabled ?? true,
+                              },
+                            }))
+                          }
+                        >
+                          <Image source={getCropImageSource(option.key)} style={styles.cropOptionImage} />
+                          <Text style={styles.cropOptionLabel}>{option.label}</Text>
+                        </Pressable>
+                      ))}
+                    </ScrollView>
+                  </View>
+
+                  <View style={styles.bottomSection}>
+                    <View style={styles.toggleCard}>
+                      <View style={styles.toggleCopy}>
+                        <Text style={styles.toggleTitle}>Komşu Etkileşimi</Text>
+                        <Text style={styles.toggleDetail}>Komşu ürün verilerini optimizasyona dahil et</Text>
+                      </View>
+                      <Pressable
+                        style={[styles.toggleSwitch, !selectedNeighborEnabled && styles.toggleSwitchPassive]}
+                        onPress={() =>
+                          setParcelDrafts((current) => ({
+                            ...current,
+                            [selectedParcel.parcel_id]: {
+                              cropKey: current[selectedParcel.parcel_id]?.cropKey ?? (selectedParcel.planned_crop as CropKey),
+                              neighborEnabled: !(current[selectedParcel.parcel_id]?.neighborEnabled ?? true),
+                            },
+                          }))
+                        }
+                      >
+                        <View style={[styles.toggleKnob, !selectedNeighborEnabled && styles.toggleKnobPassive]} />
+                      </Pressable>
+                    </View>
+                  </View>
+
+                  <View style={styles.bottomSection}>
+                    <Text style={styles.bottomSectionTitle}>Komşu Parseller</Text>
+                    <View style={styles.neighborStack}>
+                      {[
+                        { id: `${selectedParcel.parcel_id}-north`, label: "Kuzey komşusu", cropKey: "wheat" as CropKey, area: "0.8 ha" },
+                        { id: `${selectedParcel.parcel_id}-east`, label: "Doğu komşusu", cropKey: "sunflower" as CropKey, area: "1.1 ha" },
+                      ].map((neighbor) => (
+                        <View key={neighbor.id} style={styles.neighborCard}>
+                          <View style={styles.neighborIconWrap}>
+                            <Image source={getCropImageSource(neighbor.cropKey)} style={styles.neighborIconImage} />
+                          </View>
+                          <View style={styles.neighborCopy}>
+                            <Text style={styles.neighborTitle}>{neighbor.label}</Text>
+                            <Text style={styles.neighborDetail}>Ürün: {cropVisuals[neighbor.cropKey].label}</Text>
+                          </View>
+                          <Text style={styles.neighborArea}>{neighbor.area}</Text>
+                        </View>
+                      ))}
+                    </View>
+                  </View>
+                </ScrollView>
+              </>
+            ) : null}
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      <Modal
+        visible={villageGroupSheetOpen}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setVillageGroupSheetOpen(false)}
+      >
+        <Pressable style={styles.bottomSheetBackdrop} onPress={() => setVillageGroupSheetOpen(false)}>
+          <Pressable style={styles.bottomSheet} onPress={() => undefined}>
+            <View style={styles.bottomSheetHandle} />
+            <View style={styles.bottomSheetHeader}>
+              <View style={styles.bottomSheetHeaderCopy}>
+                <Text style={styles.detailEyebrow}>Parsel Bazlı Risk Listesi</Text>
+                <Text style={styles.bottomSheetTitle}>
+                  {selectedVillageGroup === "MINE" ? "Benim Tarlam" : "Diğer Parseller"}
+                </Text>
+                <Text style={styles.bottomSheetSubtitle}>
+                  Haritadaki seçili alanın içindeki parseller ve mevcut risk durumları
+                </Text>
+              </View>
+            </View>
+
+            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.bottomSheetContent}>
+              <View style={styles.bottomSection}>
+                <Text style={styles.bottomSectionTitle}>İlgili Parseller</Text>
+                <View style={styles.summaryRows}>
+                  {villageGroupParcels.map((item) => {
+                    const tone = riskTone(decisionLevel(item.parcel.parcel_id));
+                    const draftCrop = parcelDrafts[item.parcel.parcel_id]?.cropKey ?? (item.parcel.planned_crop as CropKey);
+                    return (
+                      <Pressable
+                        key={`group-sheet-${item.parcel.parcel_id}`}
+                        style={styles.villageParcelRow}
+                        onPress={() => {
+                          setVillageGroupSheetOpen(false);
+                          openParcelDetail(item.parcel.parcel_id);
+                        }}
+                      >
+                        <View style={styles.villageParcelLead}>
+                          <Image source={getCropImageSource(draftCrop)} style={styles.villageParcelIcon} />
+                          <View>
+                            <Text style={styles.villageParcelTitle}>{getFriendlyParcelName(item.parcel.parcel_id)}</Text>
+                            <Text style={styles.villageParcelSubtitle}>
+                              {getFriendlyParcelSubtitle(item.parcel.parcel_id)} • {getParcelArea(item.parcel.parcel_id)}
+                            </Text>
+                          </View>
+                        </View>
+                        <View style={[styles.riskBadge, { backgroundColor: tone.badgeBg }]}>
+                          <Text style={[styles.riskBadgeText, { color: tone.badgeFg }]}>{tone.text}</Text>
+                        </View>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+              </View>
+            </ScrollView>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      <Modal visible={cropGuideOpen} transparent animationType="slide" onRequestClose={() => setCropGuideOpen(false)}>
+        <Pressable style={styles.bottomSheetBackdrop} onPress={() => setCropGuideOpen(false)}>
+          <Pressable style={styles.bottomSheet} onPress={() => undefined}>
+            <View style={styles.bottomSheetHandle} />
+            <View style={styles.bottomSheetHeader}>
+              <View style={styles.bottomSheetHeaderCopy}>
+                <Text style={styles.detailEyebrow}>Ürün Rehberi</Text>
+                <Text style={styles.bottomSheetTitle}>{activeCropGuide.title}</Text>
+              </View>
+            </View>
+            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.bottomSheetContent}>
+              <View style={styles.bottomMediaCard}>
+                <View style={styles.selectionIconCircle}>
+                  <Image source={getCropImageSource(cropGuideCrop)} style={styles.selectionLeadIcon} />
+                </View>
+                <View style={styles.bottomMediaCopy}>
+                  <Text style={styles.bottomMediaTitle}>{cropVisuals[cropGuideCrop].label}</Text>
+                  <Text style={styles.bottomMediaText}>{activeCropGuide.summary}</Text>
+                </View>
+              </View>
+              <View style={styles.bottomSection}>
+                <Text style={styles.bottomSectionTitle}>Genel Bilgiler</Text>
+                {activeCropGuide.bullets.map((item) => (
+                  <Text key={item} style={styles.guideBullet}>• {item}</Text>
+                ))}
+              </View>
+            </ScrollView>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      <Modal visible={healthDetailOpen} transparent animationType="slide" onRequestClose={() => setHealthDetailOpen(false)}>
+        <View style={styles.detailBackdrop}>
+          <View style={styles.detailSheet}>
+            <View style={styles.detailHeader}>
+              <View style={styles.detailHeaderCopy}>
+                <Text style={styles.detailEyebrow}>Köy Sağlığı Detayı</Text>
+                <Text style={styles.detailTitle}>{villageHealthTitle}</Text>
+              </View>
+              <Pressable style={styles.detailCloseButton} onPress={() => setHealthDetailOpen(false)}>
+                <Text style={styles.detailCloseText}>✕</Text>
+              </Pressable>
+            </View>
+
+            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.detailContent}>
+              <View style={styles.detailSummaryCard}>
+                <Text style={styles.detailSummaryTitle}>Bugünkü genel durum</Text>
+                <Text style={styles.detailSummaryText}>
+                  {villageHealthTitle} için sistem durumu şu an <Text style={styles.detailSummaryStrong}>{villageStatus.toLowerCase()}</Text>. Toprak nemi
+                  ve su seviyesi dengeli. Hava tarafında kullanıcıya açık yorum: {airQualitySummary}
+                </Text>
+              </View>
+
+              <View style={styles.detailSection}>
+                <Text style={styles.detailSectionTitle}>2025 yıllık ürün özeti</Text>
+                {annualHarvestRows.map((row) => (
+                  <View key={row.crop} style={styles.detailRow}>
+                    <View style={styles.detailRowLead}>
+                      <Image source={getCropImageSource(row.cropKey)} style={styles.detailRowIcon} />
+                      <View>
+                      <Text style={styles.detailRowTitle}>{row.crop}</Text>
+                      <Text style={styles.detailRowSubtext}>Toplam hasat payı {row.share}</Text>
+                      </View>
+                    </View>
+                    <Text style={styles.detailRowValue}>{row.amount}</Text>
+                  </View>
+                ))}
+              </View>
+
+              <View style={styles.detailSection}>
+                <Text style={styles.detailSectionTitle}>2026 aylık izleme verisi</Text>
+                {monthlyVillageRows.map((row) => (
+                  <View key={row.month} style={styles.detailRow}>
+                    <View style={styles.detailRowCopy}>
+                      <Text style={styles.detailRowTitle}>{row.month}</Text>
+                      <Text style={styles.detailRowSubtext}>{row.note}</Text>
+                    </View>
+                    <Text style={styles.detailRowValue}>{row.value}</Text>
+                  </View>
+                ))}
+              </View>
+
+              <View style={styles.detailSection}>
+                <Text style={styles.detailSectionTitle}>Göstergeler nasıl okunmalı?</Text>
+                <View style={styles.detailRowCopy}>
+                  <Text style={styles.detailRowTitle}>Hava kalitesi</Text>
+                  <Text style={styles.detailRowSubtext}>
+                    {airQualityDisplay} değeri, köy üstündeki havanın temizlik ve rahat çalışma durumunu özetler. Sayı küçüldükçe açık alanda çalışmak daha rahattır.
+                  </Text>
+                </View>
+                <View style={styles.detailRowCopy}>
+                  <Text style={styles.detailRowTitle}>Su seviyesi</Text>
+                  <Text style={styles.detailRowSubtext}>{waterLevelSummary}</Text>
+                  <Text style={styles.detailFormulaText}>Kod içindeki örnek hesap: {waterLevelFormula}</Text>
+                </View>
+              </View>
+
+              <View style={styles.detailSection}>
+                <Text style={styles.detailSectionTitle}>Veri kaynağı</Text>
+                {healthSources.map((source) => (
+                  <Text key={source} style={styles.detailSourceItem}>• {source}</Text>
+                ))}
+                <Text style={styles.detailSourceItem}>
+                  • Su seviyesi ve hava kalitesi bu ekranda şu an demo amaçlı türetilmiş özet göstergelerdir; doğrudan meteoroloji ya da sulama sensöründen okunmamaktadır.
+                </Text>
+              </View>
+            </ScrollView>
+          </View>
+        </View>
       </Modal>
     </SafeAreaView>
   );
@@ -693,6 +1266,7 @@ const styles = StyleSheet.create({
     paddingVertical: 22,
     gap: 18,
   },
+  healthSubtitle: { color: "#6B7A67", fontSize: 14, fontWeight: "700" },
   healthHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: 10 },
   healthTitle: { color: "#162234", fontSize: 22, fontWeight: "900" },
   healthBadge: {
@@ -706,7 +1280,9 @@ const styles = StyleSheet.create({
   healthMetric: { flex: 1, alignItems: "center", gap: 10 },
   healthMetricLabel: { color: "#8A95A4", fontSize: 13, fontWeight: "600" },
   healthMetricValue: { color: "#2E6132", fontSize: 18, fontWeight: "900" },
+  healthMetricCaption: { color: "#6B7A67", fontSize: 12, fontWeight: "600", textAlign: "center", lineHeight: 17 },
   healthDivider: { width: 1, backgroundColor: "#E4E8DF", marginHorizontal: 4 },
+  healthHint: { color: "#6B7A67", fontSize: 13, fontWeight: "700" },
   heroShell: {
     borderRadius: 34,
     backgroundColor: "#FCFCF9",
@@ -814,7 +1390,41 @@ const styles = StyleSheet.create({
   },
   legendSwatchMine: { width: 16, height: 16, borderRadius: 6, backgroundColor: "#83B56F", borderWidth: 2, borderColor: "#2F7D44" },
   legendSwatchNeighbor: { width: 16, height: 16, borderRadius: 6, backgroundColor: "#D7D0C4", borderWidth: 2, borderColor: "#8F7A62" },
+  legendBoundary: { width: 24, height: 16, borderRadius: 6, borderWidth: 2, borderStyle: "dashed", borderColor: "#2B7FFF" },
   legendText: { color: "#556553", fontSize: 13, fontWeight: "800" },
+  villageHeaderRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", gap: 14 },
+  villageHeaderCopy: { flex: 1 },
+  villageMineButton: {
+    minHeight: 44,
+    paddingHorizontal: 16,
+    borderRadius: 999,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#E6F5E0",
+    borderWidth: 1,
+    borderColor: "#C5DDBB",
+  },
+  villageMineButtonText: { color: "#2E6D2E", fontSize: 13, fontWeight: "900" },
+  villageMapShell: {
+    minHeight: 340,
+    borderRadius: 26,
+    overflow: "hidden",
+    backgroundColor: "#D9E2D3",
+  },
+  villageParcelRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: 12,
+    borderRadius: 20,
+    backgroundColor: "#F4F5F0",
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+  },
+  villageParcelLead: { flexDirection: "row", alignItems: "center", gap: 12, flex: 1 },
+  villageParcelIcon: { width: 42, height: 42, borderRadius: 21, backgroundColor: "#FFFFFF" },
+  villageParcelTitle: { color: "#1E2D20", fontSize: 15, fontWeight: "900" },
+  villageParcelSubtitle: { color: "#6B7A67", fontSize: 12, fontWeight: "700", marginTop: 3 },
   selectionCard: {
     marginTop: 0,
     marginHorizontal: 0,
@@ -849,7 +1459,17 @@ const styles = StyleSheet.create({
   primaryButtonText: { color: "#35522E", fontSize: 15, fontWeight: "900" },
   secondaryButton: { flex: 1, minHeight: 56, borderRadius: 20, backgroundColor: "#EFE5D7", alignItems: "center", justifyContent: "center" },
   secondaryButtonText: { color: "#7B6246", fontSize: 15, fontWeight: "900" },
+  secondaryButtonCompact: {
+    minHeight: 42,
+    paddingHorizontal: 14,
+    borderRadius: 999,
+    backgroundColor: "#EFE5D7",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  secondaryButtonCompactText: { color: "#7B6246", fontSize: 12, fontWeight: "900", textTransform: "uppercase" },
   sectionCard: { backgroundColor: "#FCFCF9", borderRadius: 30, padding: 20, gap: 16 },
+  sectionHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: 12 },
   sectionTitle: { color: "#162234", fontSize: 22, fontWeight: "900" },
   sectionSubtitle: { color: "#6B7A67", fontSize: 14, lineHeight: 20 },
   cropPickerRow: { gap: 12 },
@@ -862,6 +1482,8 @@ const styles = StyleSheet.create({
   emptyStateText: { color: "#6B7A67", fontSize: 14, lineHeight: 21 },
   scenarioCard: { borderRadius: 22, backgroundColor: "#FFFEFB", borderWidth: 1, borderColor: "#E7E1D6", padding: 16, gap: 8 },
   scenarioTitle: { color: "#243224", fontSize: 18, fontWeight: "800" },
+  scenarioCropRow: { flexDirection: "row", alignItems: "center", gap: 8 },
+  scenarioCropIcon: { width: 24, height: 24, borderRadius: 8, backgroundColor: "#F7F7F3" },
   scenarioCrop: { color: "#7B6246", fontSize: 13, fontWeight: "700" },
   scenarioReport: { color: "#5F6D61", fontSize: 14, lineHeight: 21 },
   savedScenarioCard: { borderRadius: 22, backgroundColor: "#FFFEFB", borderWidth: 1, borderColor: "#E7E1D6", padding: 16, gap: 10 },
@@ -871,6 +1493,28 @@ const styles = StyleSheet.create({
   savedScenarioSummary: { color: "#5F6D61", fontSize: 14, lineHeight: 21 },
   savedScenarioCount: { color: "#7B6246", fontSize: 13, fontWeight: "800" },
   summaryRows: { gap: 10 },
+  guideRow: {
+    borderRadius: 20,
+    backgroundColor: "#F4F5F0",
+    paddingHorizontal: 14,
+    paddingVertical: 16,
+  },
+  guideRowText: { color: "#556461", fontSize: 14, lineHeight: 22, fontWeight: "700" },
+  neighborUserCard: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: 12,
+    borderRadius: 20,
+    backgroundColor: "#F4F5F0",
+    paddingHorizontal: 14,
+    paddingVertical: 16,
+  },
+  neighborUserName: { color: "#233123", fontSize: 16, fontWeight: "900" },
+  neighborUserMeta: { color: "#6B7A67", fontSize: 13, fontWeight: "700", marginTop: 4 },
+  neighborUserRight: { alignItems: "flex-end", gap: 4 },
+  neighborUserCrop: { color: "#7B6246", fontSize: 14, fontWeight: "800" },
+  neighborUserStatus: { color: "#2E6D2E", fontSize: 12, fontWeight: "900", textTransform: "uppercase" },
   summaryLine: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -901,6 +1545,161 @@ const styles = StyleSheet.create({
   drawerItemActive: { backgroundColor: "#DCEFD8" },
   drawerItemText: { color: "#263227", fontSize: 16, fontWeight: "800" },
   drawerItemTextActive: { color: "#375436" },
+  detailBackdrop: {
+    flex: 1,
+    backgroundColor: "rgba(17, 28, 18, 0.42)",
+    justifyContent: "flex-end",
+  },
+  detailSheet: {
+    maxHeight: "84%",
+    backgroundColor: "#FFFDF8",
+    borderTopLeftRadius: 30,
+    borderTopRightRadius: 30,
+    paddingHorizontal: 20,
+    paddingTop: 18,
+    paddingBottom: 24,
+  },
+  detailHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    gap: 12,
+    marginBottom: 16,
+  },
+  detailHeaderCopy: { flex: 1, gap: 4 },
+  detailEyebrow: { color: "#7B6246", fontSize: 12, fontWeight: "800", textTransform: "uppercase" },
+  detailTitle: { color: "#162234", fontSize: 22, fontWeight: "900", lineHeight: 29 },
+  detailCloseButton: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: "#EEF3E8",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  detailCloseText: { color: "#486044", fontSize: 16, fontWeight: "900" },
+  detailContent: { gap: 16, paddingBottom: 16 },
+  detailSummaryCard: {
+    borderRadius: 24,
+    backgroundColor: "#EEF4EA",
+    borderWidth: 1,
+    borderColor: "#DCE6D3",
+    padding: 16,
+    gap: 10,
+  },
+  detailSummaryTitle: { color: "#254225", fontSize: 17, fontWeight: "900" },
+  detailSummaryText: { color: "#556461", fontSize: 14, lineHeight: 21 },
+  detailSummaryStrong: { color: "#345B31", fontWeight: "900" },
+  detailSection: {
+    borderRadius: 24,
+    backgroundColor: "#FCFCF9",
+    borderWidth: 1,
+    borderColor: "#E7E1D6",
+    padding: 16,
+    gap: 12,
+  },
+  detailSectionTitle: { color: "#162234", fontSize: 18, fontWeight: "900" },
+  detailRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: 12,
+    borderRadius: 18,
+    backgroundColor: "#F4F5F0",
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+  },
+  detailRowLead: { flexDirection: "row", alignItems: "center", gap: 10, flex: 1 },
+  detailRowIcon: { width: 32, height: 32, borderRadius: 10, backgroundColor: "#FFFFFF" },
+  detailRowCopy: { flex: 1 },
+  detailRowTitle: { color: "#233123", fontSize: 15, fontWeight: "800" },
+  detailRowSubtext: { color: "#6B7A67", fontSize: 12, fontWeight: "600", marginTop: 3 },
+  detailRowValue: { color: "#2E6132", fontSize: 14, fontWeight: "900", textAlign: "right" },
+  detailFormulaText: { color: "#7B6246", fontSize: 12, fontWeight: "700", marginTop: 8, lineHeight: 18 },
+  detailSourceItem: { color: "#556461", fontSize: 14, lineHeight: 21 },
+  toggleCard: {
+    backgroundColor: "#EEF4E8",
+    borderRadius: 24,
+    padding: 18,
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    gap: 12,
+  },
+  toggleCopy: { flex: 1, paddingRight: 8 },
+  toggleTitle: { color: palette.text, fontSize: 18, fontWeight: "800" },
+  toggleDetail: { color: palette.muted, fontSize: 15, marginTop: 4, lineHeight: 21 },
+  toggleSwitch: {
+    width: 62,
+    height: 36,
+    borderRadius: 999,
+    backgroundColor: "#8DBA7E",
+    justifyContent: "center",
+    paddingHorizontal: 4,
+    alignItems: "flex-end",
+    marginTop: 4,
+    flexShrink: 0,
+  },
+  toggleKnob: { width: 28, height: 28, borderRadius: 999, backgroundColor: "#FFFFFF" },
+  toggleSwitchPassive: { backgroundColor: "#CDD7C9", alignItems: "flex-start" },
+  toggleKnobPassive: { backgroundColor: "#F7F8F4" },
+  neighborStack: { gap: 12 },
+  neighborCard: { flexDirection: "row", alignItems: "center", gap: 12, backgroundColor: "#FFFDF8", borderRadius: 22, padding: 16 },
+  neighborIconWrap: {
+    width: 58,
+    height: 58,
+    borderRadius: 18,
+    backgroundColor: "#F7F7F3",
+    overflow: "hidden",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  neighborIconImage: { width: "100%", height: "100%" },
+  neighborCopy: { flex: 1 },
+  neighborTitle: { color: palette.text, fontSize: 17, fontWeight: "800" },
+  neighborDetail: { color: palette.green, fontSize: 15, marginTop: 4 },
+  neighborArea: { color: palette.muted, fontSize: 16, fontWeight: "600" },
+  bottomSheetBackdrop: {
+    flex: 1,
+    backgroundColor: "rgba(17, 28, 18, 0.32)",
+    justifyContent: "flex-end",
+  },
+  bottomSheet: {
+    maxHeight: "78%",
+    backgroundColor: "#FFFDF8",
+    borderTopLeftRadius: 30,
+    borderTopRightRadius: 30,
+    paddingHorizontal: 20,
+    paddingTop: 12,
+    paddingBottom: 30,
+  },
+  bottomSheetHandle: {
+    alignSelf: "center",
+    width: 56,
+    height: 6,
+    borderRadius: 999,
+    backgroundColor: "#D6DDD0",
+    marginBottom: 14,
+  },
+  bottomSheetHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", gap: 12 },
+  bottomSheetHeaderCopy: { flex: 1, gap: 4 },
+  bottomSheetTitle: { color: "#162234", fontSize: 24, fontWeight: "900" },
+  bottomSheetSubtitle: { color: "#6B8B61", fontSize: 14, fontWeight: "700" },
+  bottomSheetContent: { gap: 16, paddingTop: 16, paddingBottom: 48 },
+  bottomMediaCard: {
+    borderRadius: 24,
+    backgroundColor: "#F6F8F3",
+    padding: 16,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 14,
+  },
+  bottomMediaCopy: { flex: 1, gap: 6 },
+  bottomMediaTitle: { color: "#162234", fontSize: 18, fontWeight: "900" },
+  bottomMediaText: { color: "#5F6D61", fontSize: 14, lineHeight: 20 },
+  bottomSection: { gap: 10 },
+  bottomSectionTitle: { color: "#162234", fontSize: 18, fontWeight: "900" },
+  guideBullet: { color: "#556461", fontSize: 14, lineHeight: 22 },
 });
 
 
