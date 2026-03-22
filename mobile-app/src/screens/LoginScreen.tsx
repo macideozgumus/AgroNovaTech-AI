@@ -1,11 +1,12 @@
-﻿import React, { useState } from "react";
+import React, { useMemo, useState } from "react";
 import { ImageBackground, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { NativeStackScreenProps } from "@react-navigation/native-stack";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { apiClient } from "../api/client";
-import { saveAuthToken } from "../api/cache";
+import { saveAuthProfile, saveAuthToken } from "../api/cache";
 import { RootStackParamList } from "../navigation/AppNavigator";
+import { buildVillageOptions, normalizeSearch, turkeyProvinces } from "../utils/turkeyLocations";
 
 type Props = NativeStackScreenProps<RootStackParamList, "Login">;
 
@@ -13,10 +14,34 @@ const aerialHero =
   "https://images.unsplash.com/photo-1500382017468-9049fed747ef?auto=format&fit=crop&w=1400&q=80";
 
 export function LoginScreen({ navigation }: Props) {
+  const [mode, setMode] = useState<"LOGIN" | "REGISTER">("LOGIN");
   const [username, setUsername] = useState("demo");
   const [password, setPassword] = useState("demo123");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [province, setProvince] = useState("Sakarya");
+  const [district, setDistrict] = useState("Serdivan");
+  const [village, setVillage] = useState("Serdivan Merkez Köyü");
+  const [provinceQuery, setProvinceQuery] = useState("");
+  const [districtQuery, setDistrictQuery] = useState("");
+  const [villageQuery, setVillageQuery] = useState("");
   const [errorText, setErrorText] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+
+  const provinceOptions = useMemo(
+    () => turkeyProvinces.filter((item) => normalizeSearch(item.name).includes(normalizeSearch(provinceQuery.trim()))),
+    [provinceQuery],
+  );
+  const districtOptions = useMemo(() => {
+    const allDistricts = turkeyProvinces.find((item) => item.name === province)?.districts ?? [];
+    return allDistricts.filter((item) => normalizeSearch(item.name).includes(normalizeSearch(districtQuery.trim())));
+  }, [districtQuery, province]);
+  const villageOptions = useMemo(
+    () =>
+      buildVillageOptions(province, district).filter((item) =>
+        normalizeSearch(item).includes(normalizeSearch(villageQuery.trim())),
+      ),
+    [district, province, villageQuery],
+  );
 
   const onLogin = async () => {
     setLoading(true);
@@ -24,9 +49,49 @@ export function LoginScreen({ navigation }: Props) {
     try {
       const result = await apiClient.login({ username, password });
       await saveAuthToken(result.access_token);
+      await saveAuthProfile({
+        username: result.username,
+        province: result.province,
+        district: result.district,
+        village: result.village,
+      });
       navigation.replace("VillageParcels");
     } catch (error) {
-      setErrorText(error instanceof Error ? error.message : "Giri\u015f ba\u015far\u0131s\u0131z");
+      setErrorText(error instanceof Error ? error.message : "Giriş başarısız");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const onRegister = async () => {
+    const normalizedUsername = username.trim().toLowerCase();
+    if (normalizedUsername.length < 3) {
+      setErrorText("Kullanıcı adı en az 3 karakter olmalı.");
+      return;
+    }
+    if (password.trim().length < 6) {
+      setErrorText("Şifre en az 6 karakter olmalı.");
+      return;
+    }
+    if (password !== confirmPassword) {
+      setErrorText("Şifre tekrar alanı eşleşmiyor.");
+      return;
+    }
+
+    setLoading(true);
+    setErrorText(null);
+    try {
+      const result = await apiClient.register({ username: normalizedUsername, password, province, district, village });
+      await saveAuthToken(result.access_token);
+      await saveAuthProfile({
+        username: result.username,
+        province: result.province,
+        district: result.district,
+        village: result.village,
+      });
+      navigation.replace("VillageParcels");
+    } catch (error) {
+      setErrorText(error instanceof Error ? error.message : "Kullanıcı oluşturulamadı");
     } finally {
       setLoading(false);
     }
@@ -41,12 +106,42 @@ export function LoginScreen({ navigation }: Props) {
           </ImageBackground>
 
           <View style={styles.loginCard}>
-            <Text style={styles.cardEyebrow}>{"Demo Giri\u015fi"}</Text>
-            <Text style={styles.cardTitle}>{"Bilin\u00e7li \u00c7ift\u00e7i K\u00f6y\u00fc"}</Text>
-            <Text style={styles.cardText}>{"Kendi tarlalar\u0131na ula\u015f, k\u00f6y genelini incele ve hasat plan\u0131n\u0131 takip et."}</Text>
+            <Text style={styles.cardEyebrow}>Demo Girişi</Text>
+            <Text style={styles.cardTitle}>Bilinçli Çiftçi Köyü</Text>
+            <Text style={styles.cardText}>Kendi tarlalarına ulaş, köy genelini incele ve hasat planını takip et.</Text>
+
+            <View style={styles.modeRow}>
+              <Pressable
+                style={[styles.modeButton, mode === "LOGIN" && styles.modeButtonActive]}
+                onPress={() => {
+                  setMode("LOGIN");
+                  setErrorText(null);
+                }}
+              >
+                <Text style={[styles.modeButtonText, mode === "LOGIN" && styles.modeButtonTextActive]}>Giriş Yap</Text>
+              </Pressable>
+              <Pressable
+                style={[styles.modeButton, mode === "REGISTER" && styles.modeButtonActive]}
+                onPress={() => {
+                  setMode("REGISTER");
+                  setUsername("");
+                  setPassword("");
+                  setConfirmPassword("");
+                  setProvince("Sakarya");
+                  setDistrict("Serdivan");
+                  setVillage("Serdivan Merkez Köyü");
+                  setProvinceQuery("");
+                  setDistrictQuery("");
+                  setVillageQuery("");
+                  setErrorText(null);
+                }}
+              >
+                <Text style={[styles.modeButtonText, mode === "REGISTER" && styles.modeButtonTextActive]}>Yeni Kullanıcı</Text>
+              </Pressable>
+            </View>
 
             <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>{"Kullan\u0131c\u0131 ad\u0131"}</Text>
+              <Text style={styles.inputLabel}>Kullanıcı adı</Text>
               <TextInput
                 value={username}
                 onChangeText={setUsername}
@@ -58,7 +153,7 @@ export function LoginScreen({ navigation }: Props) {
             </View>
 
             <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>{"\u015eifre"}</Text>
+              <Text style={styles.inputLabel}>Şifre</Text>
               <TextInput
                 value={password}
                 onChangeText={setPassword}
@@ -69,26 +164,144 @@ export function LoginScreen({ navigation }: Props) {
               />
             </View>
 
+            {mode === "REGISTER" ? (
+              <>
+                <View style={styles.inputGroup}>
+                  <Text style={styles.inputLabel}>Şifre tekrar</Text>
+                  <TextInput
+                    value={confirmPassword}
+                    onChangeText={setConfirmPassword}
+                    secureTextEntry
+                    style={styles.input}
+                    placeholder="Şifreyi tekrar yaz"
+                    placeholderTextColor="#93A0AA"
+                  />
+                </View>
+
+                <View style={styles.inputGroup}>
+                  <Text style={styles.inputLabel}>İl</Text>
+                  <View style={styles.selectorShell}>
+                    <TextInput
+                      value={provinceQuery}
+                      onChangeText={setProvinceQuery}
+                      style={styles.searchInput}
+                      placeholder="İl ara..."
+                      placeholderTextColor="#8C9888"
+                    />
+                    <Text style={styles.selectorValue}>Seçili İl: {province}</Text>
+                    <ScrollView style={styles.selectorScroll} nestedScrollEnabled showsVerticalScrollIndicator>
+                      {provinceOptions.map((item) => (
+                        <Pressable
+                          key={item.id}
+                          style={[styles.selectorOption, province === item.name && styles.selectorOptionActive]}
+                          onPress={() => {
+                            const nextDistrict = item.districts[0]?.name ?? "";
+                            const nextVillage = buildVillageOptions(item.name, nextDistrict)[0] ?? "";
+                            setProvince(item.name);
+                            setDistrict(nextDistrict);
+                            setVillage(nextVillage);
+                            setDistrictQuery("");
+                            setVillageQuery("");
+                          }}
+                        >
+                          <Text style={[styles.selectorOptionText, province === item.name && styles.selectorOptionTextActive]}>
+                            {item.name}
+                          </Text>
+                        </Pressable>
+                      ))}
+                    </ScrollView>
+                  </View>
+                </View>
+
+                <View style={styles.inputGroup}>
+                  <Text style={styles.inputLabel}>İlçe</Text>
+                  <View style={styles.selectorShell}>
+                    <TextInput
+                      value={districtQuery}
+                      onChangeText={setDistrictQuery}
+                      style={styles.searchInput}
+                      placeholder="İlçe ara..."
+                      placeholderTextColor="#8C9888"
+                    />
+                    <Text style={styles.selectorValue}>Seçili İlçe: {district}</Text>
+                    <ScrollView style={styles.selectorScroll} nestedScrollEnabled showsVerticalScrollIndicator>
+                      {districtOptions.map((item) => (
+                        <Pressable
+                          key={`${province}-${item.id}`}
+                          style={[styles.selectorOption, district === item.name && styles.selectorOptionActive]}
+                          onPress={() => {
+                            const nextVillage = buildVillageOptions(province, item.name)[0] ?? "";
+                            setDistrict(item.name);
+                            setVillage(nextVillage);
+                            setVillageQuery("");
+                          }}
+                        >
+                          <Text style={[styles.selectorOptionText, district === item.name && styles.selectorOptionTextActive]}>
+                            {item.name}
+                          </Text>
+                        </Pressable>
+                      ))}
+                    </ScrollView>
+                  </View>
+                </View>
+
+                <View style={styles.inputGroup}>
+                  <Text style={styles.inputLabel}>Köy</Text>
+                  <View style={styles.selectorShell}>
+                    <TextInput
+                      value={villageQuery}
+                      onChangeText={setVillageQuery}
+                      style={styles.searchInput}
+                      placeholder="Köy ara..."
+                      placeholderTextColor="#8C9888"
+                    />
+                    <Text style={styles.selectorValue}>Seçili Köy: {village}</Text>
+                    <ScrollView style={styles.selectorScroll} nestedScrollEnabled showsVerticalScrollIndicator>
+                      {villageOptions.map((item) => (
+                        <Pressable
+                          key={`${district}-${item}`}
+                          style={[styles.selectorOption, village === item && styles.selectorOptionActive]}
+                          onPress={() => setVillage(item)}
+                        >
+                          <Text style={[styles.selectorOptionText, village === item && styles.selectorOptionTextActive]}>
+                            {item}
+                          </Text>
+                        </Pressable>
+                      ))}
+                    </ScrollView>
+                  </View>
+                </View>
+              </>
+            ) : null}
+
             {errorText ? (
               <View style={styles.errorBox}>
-                <Text style={styles.errorTitle}>{"Giri\u015f ba\u015far\u0131s\u0131z"}</Text>
+                <Text style={styles.errorTitle}>{mode === "LOGIN" ? "Giriş başarısız" : "Kayıt başarısız"}</Text>
                 <Text style={styles.errorText}>{errorText}</Text>
               </View>
             ) : null}
 
-            <Pressable style={[styles.primaryButton, loading && styles.primaryButtonDisabled]} onPress={onLogin} disabled={loading}>
-              <Text style={styles.primaryButtonText}>{loading ? "Giriliyor..." : "Giri\u015f Yap"}</Text>
+            <Pressable
+              style={[styles.primaryButton, loading && styles.primaryButtonDisabled]}
+              onPress={mode === "LOGIN" ? onLogin : onRegister}
+              disabled={loading}
+            >
+              <Text style={styles.primaryButtonText}>
+                {loading ? (mode === "LOGIN" ? "Giriş yapılıyor..." : "Kullanıcı oluşturuluyor...") : mode === "LOGIN" ? "Giriş Yap" : "Kullanıcı Oluştur"}
+              </Text>
             </Pressable>
           </View>
 
           <View style={styles.metaRow}>
             <View style={styles.metaCard}>
               <Text style={styles.metaLabel}>DEMO HESAP</Text>
-              <Text style={styles.metaValue}>demo / demo123</Text>
+              <Text style={styles.metaValue}>demo / demo123 / Sakarya / Serdivan / Kazımpaşa Köyü</Text>
             </View>
             <View style={styles.metaCard}>
-              <Text style={styles.metaLabel}>PANEL</Text>
-              <Text style={styles.metaValue}>{"Tarlam - K\u00f6y Geneli - Hasat"}</Text>
+              <Text style={styles.metaLabel}>{mode === "LOGIN" ? "PANEL" : "ADRES SIRASI"}</Text>
+              <Text style={styles.metaValue}>
+                {mode === "LOGIN" ? "Tarlam - Köy Geneli - Hasat" : "İl → İlçe → Köy sıralı şekilde seçilir"}
+              </Text>
             </View>
           </View>
         </ScrollView>
@@ -100,81 +313,148 @@ export function LoginScreen({ navigation }: Props) {
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: "#F4F6F2",
+    backgroundColor: "#EEF2E7",
   },
   page: {
     flex: 1,
-    backgroundColor: "#F4F6F2",
+    backgroundColor: "#EEF2E7",
   },
   scrollContent: {
-    paddingBottom: 28,
-    paddingTop: 12,
+    paddingBottom: 32,
+    paddingTop: 14,
   },
   heroMap: {
     minHeight: 360,
     justifyContent: "flex-start",
-    paddingHorizontal: 16,
+    paddingHorizontal: 18,
     paddingTop: 18,
   },
   heroMapImage: {
-    borderBottomLeftRadius: 34,
-    borderBottomRightRadius: 34,
+    borderRadius: 34,
   },
   heroOverlay: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: "rgba(10, 18, 20, 0.1)",
-    borderBottomLeftRadius: 34,
-    borderBottomRightRadius: 34,
+    backgroundColor: "rgba(22, 34, 52, 0.12)",
+    borderRadius: 34,
   },
   loginCard: {
     marginHorizontal: 18,
     marginTop: -42,
-    backgroundColor: "#FFFFFF",
-    borderRadius: 28,
-    padding: 20,
-    gap: 14,
+    backgroundColor: "#FCFCF9",
+    borderRadius: 30,
+    padding: 22,
+    gap: 16,
   },
   cardEyebrow: {
-    color: "#2B8A37",
-    fontSize: 13,
-    fontWeight: "800",
-    letterSpacing: 0.8,
+    color: "#7A6546",
+    fontSize: 12,
+    fontWeight: "900",
+    letterSpacing: 0.9,
     textTransform: "uppercase",
   },
   cardTitle: {
-    color: "#10162F",
+    color: "#162234",
     fontSize: 30,
     fontWeight: "900",
     lineHeight: 38,
   },
   cardText: {
-    color: "#68796F",
+    color: "#6B7A67",
     fontSize: 15,
     lineHeight: 22,
+  },
+  modeRow: {
+    flexDirection: "row",
+    gap: 10,
+  },
+  modeButton: {
+    flex: 1,
+    minHeight: 48,
+    borderRadius: 18,
+    backgroundColor: "#F4F5F0",
+    borderWidth: 1,
+    borderColor: "#DFE4D8",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  modeButtonActive: {
+    backgroundColor: "#DCEFD8",
+    borderColor: "#BED5B3",
+  },
+  modeButtonText: {
+    color: "#5D6B5B",
+    fontSize: 14,
+    fontWeight: "800",
+  },
+  modeButtonTextActive: {
+    color: "#375436",
   },
   inputGroup: {
     gap: 8,
   },
-  inputLabel: {
-    color: "#20362B",
+  selectorShell: {
+    borderRadius: 20,
+    backgroundColor: "#F4F5F0",
+    borderWidth: 1,
+    borderColor: "#DFE4D8",
+    padding: 12,
+    gap: 10,
+  },
+  searchInput: {
+    minHeight: 48,
+    borderRadius: 16,
+    backgroundColor: "#FFFFFF",
+    borderWidth: 1,
+    borderColor: "#DFE4D8",
+    paddingHorizontal: 14,
+    color: "#20313B",
     fontSize: 15,
+  },
+  selectorValue: {
+    color: "#375436",
+    fontSize: 14,
+    fontWeight: "800",
+  },
+  selectorScroll: {
+    maxHeight: 170,
+  },
+  selectorOption: {
+    borderRadius: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  selectorOptionActive: {
+    backgroundColor: "#DCEFD8",
+  },
+  selectorOptionText: {
+    color: "#556461",
+    fontSize: 14,
     fontWeight: "700",
+  },
+  selectorOptionTextActive: {
+    color: "#375436",
+    fontWeight: "900",
+  },
+  inputLabel: {
+    color: "#233123",
+    fontSize: 15,
+    fontWeight: "800",
   },
   input: {
     minHeight: 58,
     borderRadius: 20,
-    backgroundColor: "#F8FAF7",
+    backgroundColor: "#F4F5F0",
     borderWidth: 1,
-    borderColor: "#D9E5DA",
+    borderColor: "#DFE4D8",
     paddingHorizontal: 16,
     color: "#20313B",
     fontSize: 17,
   },
   errorBox: {
     borderRadius: 18,
-    backgroundColor: "#FDE5DF",
+    backgroundColor: "#FFF0EC",
     borderWidth: 1,
-    borderColor: "#EFB1A3",
+    borderColor: "#F0C2B7",
     padding: 14,
     gap: 6,
   },
@@ -190,16 +470,18 @@ const styles = StyleSheet.create({
   primaryButton: {
     minHeight: 58,
     borderRadius: 20,
-    backgroundColor: "#1AD95A",
+    backgroundColor: "#BFD9B8",
+    borderWidth: 1,
+    borderColor: "#A8C8A0",
     alignItems: "center",
     justifyContent: "center",
     marginTop: 6,
   },
   primaryButtonDisabled: {
-    opacity: 0.7,
+    opacity: 0.6,
   },
   primaryButtonText: {
-    color: "#12311C",
+    color: "#35522E",
     fontSize: 17,
     fontWeight: "900",
   },
@@ -212,18 +494,20 @@ const styles = StyleSheet.create({
   metaCard: {
     flex: 1,
     borderRadius: 20,
-    backgroundColor: "#EAF1E4",
+    backgroundColor: "#FCFCF9",
     padding: 14,
     gap: 8,
+    borderWidth: 1,
+    borderColor: "#E1E7DA",
   },
   metaLabel: {
-    color: "#476454",
+    color: "#6B7A67",
     fontSize: 12,
-    fontWeight: "800",
+    fontWeight: "900",
   },
   metaValue: {
-    color: "#1B223A",
+    color: "#162234",
     fontSize: 16,
-    fontWeight: "700",
+    fontWeight: "800",
   },
 });

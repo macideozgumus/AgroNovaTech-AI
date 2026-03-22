@@ -784,7 +784,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 9,
   },
-  researchPreviewIcon: { width: 20, height: 20, borderRadius: 6, backgroundColor: "#F5F7F2" },
+  researchPreviewIcon: { width: 20, height: 20, borderRadius: 6, backgroundColor: "#F5F7F2", resizeMode: "contain" },
   researchPreviewText: { color: "#4C5C4E", fontSize: 12, fontWeight: "800" },
   researchApplyButton: {
     minHeight: 46,
@@ -819,6 +819,7 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     backgroundColor: "#FFFFFF",
     alignSelf: "flex-start",
+    resizeMode: "contain",
   },
   emptyPanelIcon: {
     width: 52,
@@ -885,7 +886,7 @@ const styles = StyleSheet.create({
     borderColor: "#DEE4D7",
   },
   cropChipActive: { backgroundColor: "#E6F5E0", borderColor: "#C5DDBB" },
-  cropChipIcon: { width: 22, height: 22, borderRadius: 8, backgroundColor: "#F6F8F3" },
+  cropChipIcon: { width: 22, height: 22, borderRadius: 8, backgroundColor: "#F6F8F3", resizeMode: "contain" },
   cropChipEmptyIcon: {
     width: 22,
     height: 22,
@@ -902,7 +903,7 @@ const styles = StyleSheet.create({
   cropChipTextActive: { color: "#2E6D2E" },
   scoreRow: { flexDirection: "row", justifyContent: "space-between", gap: 12 },
   inlineCropRow: { flexDirection: "row", alignItems: "center", gap: 8 },
-  inlineCropIcon: { width: 20, height: 20, borderRadius: 6, backgroundColor: "#F5F7F2" },
+  inlineCropIcon: { width: 20, height: 20, borderRadius: 6, backgroundColor: "#F5F7F2", resizeMode: "contain" },
   scoreValue: { color: "#2E6132", fontSize: 14, fontWeight: "900" },
   scoreCrop: { color: "#7B6246", fontSize: 14, fontWeight: "800" },
   explanationBox: { borderRadius: 16, backgroundColor: "#FFFFFF", padding: 12, gap: 6 },

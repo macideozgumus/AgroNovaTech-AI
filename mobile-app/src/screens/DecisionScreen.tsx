@@ -324,7 +324,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  neighborIconImage: { width: "100%", height: "100%" },
+  neighborIconImage: { width: "100%", height: "100%", resizeMode: "contain" },
   neighborCopy: { flex: 1 },
   neighborTitle: { color: palette.text, fontSize: 17, fontWeight: "800" },
   neighborDetail: { color: palette.green, fontSize: 15, marginTop: 4 },

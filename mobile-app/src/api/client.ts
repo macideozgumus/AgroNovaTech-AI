@@ -9,7 +9,9 @@ import type {
   LoginResponse,
   NeighborsResponse,
   ParcelListResponse,
+  RegisterRequest,
   ScoreRequest,
+  UsersResponse,
 } from "../types/api";
 
 const API_BASE_URL =
@@ -84,6 +86,17 @@ export const apiClient = {
       method: "POST",
       body: JSON.stringify(payload),
     });
+  },
+
+  register(payload: RegisterRequest) {
+    return requestJson<LoginResponse>("/api/v1/auth/register", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+
+  getUsers() {
+    return requestJson<UsersResponse>("/api/v1/users");
   },
 
   getParcels(villageId: string) {

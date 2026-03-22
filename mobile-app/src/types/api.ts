@@ -8,9 +8,32 @@ export interface LoginRequest {
   password: string;
 }
 
+export interface RegisterRequest {
+  username: string;
+  password: string;
+  province: string;
+  district: string;
+  village: string;
+}
+
 export interface LoginResponse {
   access_token: string;
   token_type: "bearer";
+  username: string;
+  province: string;
+  district: string;
+  village: string;
+}
+
+export interface UserSummary {
+  username: string;
+  province: string;
+  district: string;
+  village: string;
+}
+
+export interface UsersResponse {
+  users: UserSummary[];
 }
 
 export interface ParcelItem {

@@ -15,10 +15,11 @@ import { useFocusEffect } from "@react-navigation/native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { apiClient } from "../api/client";
+import { clearAuthSession, loadAuthProfile } from "../api/cache";
 import { LeafletParcelMap } from "../components/LeafletParcelMap";
 import { RootStackParamList } from "../navigation/AppNavigator";
 import { getSavedScenarios, type SavedScenario } from "../scenario/store";
-import type { DecisionResponse, ParcelItem, RiskLevel } from "../types/api";
+import type { DecisionResponse, ParcelItem, RiskLevel, UserSummary } from "../types/api";
 import {
   cropVisuals,
   getCropImageSource,
@@ -60,6 +61,51 @@ type ParcelDraft = {
   neighborEnabled: boolean;
 };
 type VillageGroupKey = "MINE" | "NEIGHBOR";
+type HarvestAlertTone = "urgent" | "soon" | "ready";
+type HarvestPlan = {
+  id: string;
+  title: string;
+  parcelId: string;
+  cropKey: CropKey;
+  date: string;
+  note: string;
+  reminder: string;
+  tone: HarvestAlertTone;
+};
+
+const harvestMonthNames = ["Ocak", "Subat", "Mart", "Nisan", "Mayis", "Haziran", "Temmuz", "Agustos", "Eylul", "Ekim", "Kasim", "Aralik"];
+const harvestWeekDays = ["Pzt", "Sal", "Car", "Per", "Cum", "Cmt", "Paz"];
+
+const toIsoDate = (date: Date) => {
+  const year = date.getFullYear();
+  const month = `${date.getMonth() + 1}`.padStart(2, "0");
+  const day = `${date.getDate()}`.padStart(2, "0");
+  return `${year}-${month}-${day}`;
+};
+
+const formatHarvestDate = (value: string) => {
+  const date = new Date(`${value}T00:00:00`);
+  return `${date.getDate()} ${harvestMonthNames[date.getMonth()]} ${date.getFullYear()}`;
+};
+
+const formatHarvestMonthYear = (value: string) => {
+  const date = new Date(`${value}T00:00:00`);
+  return `${harvestMonthNames[date.getMonth()]} ${date.getFullYear()}`;
+};
+
+const getHarvestRelativeLabel = (value: string) => {
+  const today = new Date("2026-03-22T00:00:00");
+  const target = new Date(`${value}T00:00:00`);
+  const diff = Math.round((target.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+
+  if (diff <= 0) {
+    return "Bugun";
+  }
+  if (diff === 1) {
+    return "Yarin";
+  }
+  return `${diff} gun sonra`;
+};
 
 const DEFAULT_SEASON = "2026_Spring";
 
@@ -140,6 +186,46 @@ export function VillageParcelsScreen({ navigation }: Props) {
   const [cropGuideCrop, setCropGuideCrop] = useState<CropKey>("corn");
   const [villageGroupSheetOpen, setVillageGroupSheetOpen] = useState(false);
   const [selectedVillageGroup, setSelectedVillageGroup] = useState<VillageGroupKey>("MINE");
+  const [selectedNeighborUserName, setSelectedNeighborUserName] = useState<string | null>(null);
+  const [authProfile, setAuthProfile] = useState<{ username: string; province: string; district: string; village: string } | null>(null);
+  const [communityUsers, setCommunityUsers] = useState<UserSummary[]>([]);
+  const [harvestPlanModalOpen, setHarvestPlanModalOpen] = useState(false);
+  const [harvestDraftTitle, setHarvestDraftTitle] = useState("Yeni hasat operasyonu");
+  const [harvestDraftDate, setHarvestDraftDate] = useState("2026-03-26");
+  const [harvestDraftNote, setHarvestDraftNote] = useState("Ekip ve makine hazirligini bir gun once tamamla.");
+  const [selectedHarvestDate, setSelectedHarvestDate] = useState("2026-03-24");
+  const [harvestPlans, setHarvestPlans] = useState<HarvestPlan[]>([
+    {
+      id: "harvest-1",
+      title: "Mısır hasadı yaklaşıyor",
+      parcelId: "p3",
+      cropKey: "corn",
+      date: "2026-03-24",
+      note: "Nem takibi ve biçerdöver rezervasyonu bugün netleşmeli.",
+      reminder: "2 gun kaldi",
+      tone: "urgent",
+    },
+    {
+      id: "harvest-2",
+      title: "Ayçiçeği örnekleme kontrolü",
+      parcelId: "p5",
+      cropKey: "sunflower",
+      date: "2026-03-27",
+      note: "Depo alanı ve çuvallama planı hazırlanmalı.",
+      reminder: "5 gun kaldi",
+      tone: "soon",
+    },
+    {
+      id: "harvest-3",
+      title: "Buğday için ekip çıkışı",
+      parcelId: "p1",
+      cropKey: "wheat",
+      date: "2026-03-29",
+      note: "Sabah vardiyası için 4 kişilik ekip hazır olsun.",
+      reminder: "1 hafta icinde",
+      tone: "ready",
+    },
+  ]);
 
   useEffect(() => {
     let mounted = true;
@@ -195,6 +281,30 @@ export function VillageParcelsScreen({ navigation }: Props) {
     };
 
     load();
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    let mounted = true;
+
+    const loadSessionData = async () => {
+      try {
+        const [profile, usersResponse] = await Promise.all([loadAuthProfile(), apiClient.getUsers()]);
+        if (mounted) {
+          setAuthProfile(profile);
+          setCommunityUsers(usersResponse.users);
+        }
+      } catch {
+        const profile = await loadAuthProfile();
+        if (mounted) {
+          setAuthProfile(profile);
+        }
+      }
+    };
+
+    loadSessionData();
     return () => {
       mounted = false;
     };
@@ -348,10 +458,58 @@ export function VillageParcelsScreen({ navigation }: Props) {
   };
   const openVillageGroupSheet = (group: VillageGroupKey) => {
     setSelectedVillageGroup(group);
+    if (group !== "NEIGHBOR") {
+      setSelectedNeighborUserName(null);
+    }
     setVillageGroupSheetOpen(true);
+  };
+  const openNeighborUserVillageView = (userName: string) => {
+    openVillageOverview();
+    setSelectedNeighborUserName(userName);
+    openVillageGroupSheet("NEIGHBOR");
   };
   const openScenarioBuilder = () =>
     navigation.navigate("ScenarioBuilder", { focusParcelId: selectedParcel?.parcel_id ?? undefined });
+  const logout = async () => {
+    await clearAuthSession();
+    navigation.replace("Login");
+  };
+  const openHarvestComposer = () => {
+    const defaultParcelId = selectedParcel?.parcel_id ?? parcels[0]?.parcel_id ?? "p1";
+    const defaultCrop = (parcelDrafts[defaultParcelId]?.cropKey ?? parcels.find((item) => item.parcel_id === defaultParcelId)?.planned_crop ?? "wheat") as CropKey;
+    setHarvestDraftTitle(`${cropVisuals[defaultCrop]?.label ?? "Urun"} hasat plani`);
+    setHarvestDraftDate(selectedHarvestDate);
+    setHarvestDraftNote("Makine, ekip ve depo hazirligini ayni karttan takip et.");
+    setSelectedParcelId(defaultParcelId);
+    setHarvestPlanModalOpen(true);
+  };
+  const saveHarvestPlan = () => {
+    const parcelId = selectedParcel?.parcel_id ?? parcels[0]?.parcel_id;
+    if (!parcelId) {
+      return;
+    }
+
+    const cropKey = (parcelDrafts[parcelId]?.cropKey ?? parcels.find((item) => item.parcel_id === parcelId)?.planned_crop ?? "wheat") as CropKey;
+    const relativeLabel = getHarvestRelativeLabel(harvestDraftDate);
+    const tone: HarvestAlertTone =
+      relativeLabel === "Bugun" || relativeLabel === "Yarin" ? "urgent" : relativeLabel.includes("gun") ? "soon" : "ready";
+
+    setHarvestPlans((current) => [
+      {
+        id: `harvest-${current.length + 1}`,
+        title: harvestDraftTitle.trim() || "Hasat plani",
+        parcelId,
+        cropKey,
+        date: harvestDraftDate,
+        note: harvestDraftNote.trim() || "Ek not girilmedi.",
+        reminder: relativeLabel,
+        tone,
+      },
+      ...current,
+    ]);
+    setSelectedHarvestDate(harvestDraftDate);
+    setHarvestPlanModalOpen(false);
+  };
 
   const renderSavedScenarios = () => (
     <View style={styles.sectionCard}>
@@ -423,13 +581,15 @@ export function VillageParcelsScreen({ navigation }: Props) {
             <Text style={styles.avatarGlyph}>🌿</Text>
           </View>
           <View style={styles.welcomeCopy}>
-            <Text style={styles.welcomeTitle}>Hoş Geldiniz!</Text>
-            <Text style={styles.welcomeLocation}>Sakarya, TR</Text>
+            <Text style={styles.welcomeTitle}>{authProfile?.username ?? "Hos Geldiniz!"}</Text>
+            <Text style={styles.welcomeLocation}>
+              {authProfile ? `${authProfile.province} / ${authProfile.district} / ${authProfile.village}` : "Sakarya / Serdivan / Kazimpasa Koyu"}
+            </Text>
           </View>
         </View>
-        <View style={styles.notificationButton}>
-          <Text style={styles.notificationButtonText}>◔</Text>
-        </View>
+        <Pressable style={styles.notificationButton} onPress={logout}>
+          <Text style={styles.notificationButtonText}>Cikis</Text>
+        </Pressable>
       </View>
 
       <View style={styles.weatherCard}>
@@ -795,34 +955,197 @@ export function VillageParcelsScreen({ navigation }: Props) {
   const renderNeighborUsers = () => (
     <View style={styles.sectionCard}>
       <Text style={styles.sectionTitle}>Komşu Kullanıcılar</Text>
-      <Text style={styles.sectionSubtitle}>Yakındaki üreticileri ve aktif ürün planlarını burada görebilirsin.</Text>
+      <Text style={styles.sectionSubtitle}>Kayitli kullanicilari ve sectikleri illeri burada gorebilirsin.</Text>
       <View style={styles.summaryRows}>
-        {[
-          { name: "Ahmet Kaya", area: "A Blok çevresi", crop: "Buğday", status: "Aktif" },
-          { name: "Zeynep Demir", area: "B Blok doğusu", crop: "Ayçiçeği", status: "İzlemede" },
-          { name: "Mehmet Arı", area: "Kuzey sınır hattı", crop: "Arpa", status: "Aktif" },
-        ].map((user) => (
-          <View key={user.name} style={styles.neighborUserCard}>
+        {communityUsers.map((user) => (
+          <Pressable key={user.username} style={styles.neighborUserCard} onPress={() => openNeighborUserVillageView(user.username)}>
             <View>
-              <Text style={styles.neighborUserName}>{user.name}</Text>
-              <Text style={styles.neighborUserMeta}>{user.area}</Text>
+              <Text style={styles.neighborUserName}>{user.username}</Text>
+              <Text style={styles.neighborUserMeta}>{`${user.province} / ${user.district} / ${user.village}`}</Text>
             </View>
             <View style={styles.neighborUserRight}>
-              <Text style={styles.neighborUserCrop}>{user.crop}</Text>
-              <Text style={styles.neighborUserStatus}>{user.status}</Text>
+              <Text style={styles.neighborUserCrop}>Kayitli Kullanici</Text>
+              <Text style={styles.neighborUserStatus}>{authProfile?.username === user.username ? "Aktif Oturum" : "Topluluk"}</Text>
             </View>
-          </View>
+          </Pressable>
         ))}
       </View>
     </View>
   );
 
-  const renderPlaceholder = (title: string, body: string) => (
-    <View style={styles.placeholderCard}>
-      <Text style={styles.placeholderTitle}>{title}</Text>
-      <Text style={styles.placeholderText}>{body}</Text>
-    </View>
-  );
+  const renderHarvestPlanner = () => {
+    const calendarDays = Array.from({ length: 14 }, (_, index) => {
+      const date = new Date("2026-03-22T00:00:00");
+      date.setDate(date.getDate() + index);
+      const iso = toIsoDate(date);
+      const planCount = harvestPlans.filter((item) => item.date === iso).length;
+      return {
+        iso,
+        dayLabel: `${date.getDate()}`,
+        weekLabel: harvestWeekDays[(date.getDay() + 6) % 7],
+        planCount,
+        active: planCount > 0,
+      };
+    });
+
+    const upcomingPlans = [...harvestPlans].sort((a, b) => a.date.localeCompare(b.date)).slice(0, 3);
+    const selectedDatePlans = harvestPlans
+      .filter((plan) => plan.date === selectedHarvestDate)
+      .sort((a, b) => a.title.localeCompare(b.title));
+    const calendarMonthLabel = formatHarvestMonthYear(selectedHarvestDate);
+
+    return (
+      <>
+        <View style={styles.harvestHeroCard}>
+          <View style={styles.harvestHeroTop}>
+            <View style={styles.harvestHeroCopy}>
+              <Text style={styles.sectionTitle}>Hasat Takvimi</Text>
+              <Text style={styles.sectionSubtitle}>
+                Yaklaşan hasatları ve kullanıcı girişlerini tek takvim akışında yönet.
+              </Text>
+            </View>
+            <View style={styles.harvestHeroBadge}>
+              <Text style={styles.harvestHeroBadgeText}>{harvestPlans.length} plan</Text>
+            </View>
+          </View>
+
+          <Pressable style={styles.harvestPrimaryAction} onPress={openHarvestComposer}>
+            <View style={styles.harvestPrimaryIcon}>
+              <Text style={styles.harvestPrimaryIconText}>+</Text>
+            </View>
+            <View style={styles.harvestActionCopy}>
+              <Text style={styles.harvestActionTitle}>Plan Oluştur</Text>
+              <Text style={styles.harvestActionText}>Takvim üstünden yeni hasat operasyonu ekle</Text>
+            </View>
+          </Pressable>
+        </View>
+
+        <View style={styles.sectionCard}>
+          <Text style={styles.sectionTitle}>Yaklaşan Bildirimler</Text>
+          <Text style={styles.sectionSubtitle}>Hasat zamanı yaklaşıyor uyarıları burada görünür.</Text>
+          <View style={styles.summaryRows}>
+            {upcomingPlans.map((plan) => (
+              <View
+                key={plan.id}
+                style={[
+                  styles.harvestAlertCard,
+                  plan.tone === "urgent"
+                    ? styles.harvestAlertUrgent
+                    : plan.tone === "soon"
+                      ? styles.harvestAlertSoon
+                      : styles.harvestAlertReady,
+                ]}
+              >
+                <View style={styles.harvestAlertHeader}>
+                  <Text style={styles.harvestAlertTitle}>{plan.title}</Text>
+                  <Text style={styles.harvestAlertDate}>{plan.reminder}</Text>
+                </View>
+                <Text style={styles.harvestAlertMeta}>
+                  {getFriendlyParcelName(plan.parcelId)} • {cropVisuals[plan.cropKey].label} • {formatHarvestDate(plan.date)}
+                </Text>
+                <Text style={styles.harvestAlertText}>{plan.note}</Text>
+              </View>
+            ))}
+          </View>
+        </View>
+
+        <View style={styles.sectionCard}>
+          <View style={styles.sectionHeader}>
+            <View style={styles.harvestSectionLead}>
+              <Text style={styles.sectionTitle}>Takvim Girişleri</Text>
+              <Text style={styles.sectionSubtitle}>Kullanıcı takvim içine giriş yapar, uygun günlerde plan yoğunluğu görünür.</Text>
+            </View>
+            <Pressable style={styles.secondaryButtonCompact} onPress={openHarvestComposer}>
+              <Text style={styles.secondaryButtonCompactText}>Takvime Ekle</Text>
+            </Pressable>
+          </View>
+
+          <View style={styles.harvestCalendarHeader}>
+            <Text style={styles.harvestCalendarMonth}>{calendarMonthLabel}</Text>
+            <Text style={styles.harvestCalendarHint}>Secili takvim donemi</Text>
+          </View>
+
+          <View style={styles.harvestCalendarGrid}>
+            {calendarDays.map((day) => (
+              <Pressable
+                key={day.iso}
+                style={[
+                  styles.harvestDayCard,
+                  day.active && styles.harvestDayCardActive,
+                  selectedHarvestDate === day.iso && styles.harvestDayCardSelected,
+                ]}
+                onPress={() => {
+                  setHarvestDraftDate(day.iso);
+                  setSelectedHarvestDate(day.iso);
+                }}
+              >
+                <Text
+                  style={[
+                    styles.harvestWeekLabel,
+                    day.active && styles.harvestWeekLabelActive,
+                    selectedHarvestDate === day.iso && styles.harvestWeekLabelSelected,
+                  ]}
+                >
+                  {day.weekLabel}
+                </Text>
+                <Text
+                  style={[
+                    styles.harvestDayLabel,
+                    day.active && styles.harvestDayLabelActive,
+                    selectedHarvestDate === day.iso && styles.harvestDayLabelSelected,
+                  ]}
+                >
+                  {day.dayLabel}
+                </Text>
+                <Text
+                  style={[
+                    styles.harvestPlanCount,
+                    day.active && styles.harvestPlanCountActive,
+                    selectedHarvestDate === day.iso && styles.harvestPlanCountSelected,
+                  ]}
+                >
+                  {day.planCount > 0 ? `${day.planCount} kayit` : "bos"}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
+        </View>
+
+        <View style={styles.sectionCard}>
+          <Text style={styles.sectionTitle}>Kayıtlı Hasat Planları</Text>
+          <Text style={styles.sectionSubtitle}>
+            {formatHarvestDate(selectedHarvestDate)} tarihine ait kayıtlar aşağıda listelenir.
+          </Text>
+
+          {selectedDatePlans.length === 0 ? (
+            <View style={styles.emptyState}>
+              <Text style={styles.emptyStateTitle}>Bu tarih için kayıt yok</Text>
+              <Text style={styles.emptyStateText}>
+                Başka bir tarih seçebilir veya `Takvime Ekle` ile yeni hasat planı oluşturabilirsin.
+              </Text>
+            </View>
+          ) : (
+            selectedDatePlans.map((plan) => (
+              <View key={plan.id} style={styles.harvestTimelineCard}>
+                <View style={styles.harvestTimelineLead}>
+                  <View style={styles.harvestTimelineIcon}>
+                    <Image source={getCropImageSource(plan.cropKey)} style={styles.harvestTimelineImage} />
+                  </View>
+                  <View style={styles.harvestTimelineCopy}>
+                    <Text style={styles.harvestTimelineTitle}>{plan.title}</Text>
+                    <Text style={styles.harvestTimelineMeta}>
+                      {formatHarvestDate(plan.date)} • {getFriendlyParcelName(plan.parcelId)} • {cropVisuals[plan.cropKey].label}
+                    </Text>
+                  </View>
+                </View>
+                <Text style={styles.harvestTimelineNote}>{plan.note}</Text>
+              </View>
+            ))
+          )}
+        </View>
+      </>
+    );
+  };
 
   return (
     <SafeAreaView style={styles.safeArea} edges={["left", "right"]}>
@@ -850,10 +1173,7 @@ export function VillageParcelsScreen({ navigation }: Props) {
                 ? renderSavedScenarios()
               : mode === "SUMMARY"
                 ? renderQuickSummary()
-              : renderPlaceholder(
-                  "Hasat planı ikinci adım",
-                  "Ana sayfayı profesyonel seviyeye aldıktan sonra hasat planını aynı görsel sistemle ilerleteceğim.",
-                )}
+              : renderHarvestPlanner()}
         </ScrollView>
       </View>
 
@@ -999,6 +1319,95 @@ export function VillageParcelsScreen({ navigation }: Props) {
       </Modal>
 
       <Modal
+        visible={harvestPlanModalOpen}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setHarvestPlanModalOpen(false)}
+      >
+        <Pressable style={styles.bottomSheetBackdrop} onPress={() => setHarvestPlanModalOpen(false)}>
+          <Pressable style={styles.bottomSheet} onPress={() => undefined}>
+            <View style={styles.bottomSheetHandle} />
+            <View style={styles.bottomSheetHeader}>
+              <View style={styles.bottomSheetHeaderCopy}>
+                <Text style={styles.detailEyebrow}>Takvim Girdisi</Text>
+                <Text style={styles.bottomSheetTitle}>Yeni Hasat Planı</Text>
+                <Text style={styles.bottomSheetSubtitle}>
+                  Artı butonu veya takvim günü üstünden açılır. Kullanıcı hasat akışını bu formdan girer.
+                </Text>
+              </View>
+            </View>
+
+            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.bottomSheetContent}>
+              <View style={styles.bottomSection}>
+                <Text style={styles.bottomSectionTitle}>Plan Adı</Text>
+                <TextInput
+                  value={harvestDraftTitle}
+                  onChangeText={setHarvestDraftTitle}
+                  placeholder="Ornek: Misir hasat operasyonu"
+                  placeholderTextColor="#7E887D"
+                  style={styles.harvestInput}
+                />
+              </View>
+
+              <View style={styles.bottomSection}>
+                <Text style={styles.bottomSectionTitle}>Tarih</Text>
+                <TextInput
+                  value={harvestDraftDate}
+                  onChangeText={setHarvestDraftDate}
+                  placeholder="YYYY-AA-GG"
+                  placeholderTextColor="#7E887D"
+                  style={styles.harvestInput}
+                />
+              </View>
+
+              <View style={styles.bottomSection}>
+                <Text style={styles.bottomSectionTitle}>Hedef Parsel</Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.cropPickerRow}>
+                  {parcels.slice(0, 6).map((parcel) => (
+                    <Pressable
+                      key={parcel.parcel_id}
+                      style={[
+                        styles.harvestParcelChip,
+                        selectedParcel?.parcel_id === parcel.parcel_id && styles.harvestParcelChipActive,
+                      ]}
+                      onPress={() => setSelectedParcelId(parcel.parcel_id)}
+                    >
+                      <Text
+                        style={[
+                          styles.harvestParcelChipText,
+                          selectedParcel?.parcel_id === parcel.parcel_id && styles.harvestParcelChipTextActive,
+                        ]}
+                      >
+                        {getFriendlyParcelName(parcel.parcel_id)}
+                      </Text>
+                    </Pressable>
+                  ))}
+                </ScrollView>
+              </View>
+
+              <View style={styles.bottomSection}>
+                <Text style={styles.bottomSectionTitle}>Not</Text>
+                <TextInput
+                  value={harvestDraftNote}
+                  onChangeText={setHarvestDraftNote}
+                  placeholder="Ekipman, depo, personel veya kontrol notu"
+                  placeholderTextColor="#7E887D"
+                  style={styles.harvestTextarea}
+                  multiline
+                />
+              </View>
+
+              <View style={styles.primaryActionsRow}>
+                <Pressable style={styles.primaryButton} onPress={saveHarvestPlan}>
+                  <Text style={styles.primaryButtonText}>Plani Kaydet</Text>
+                </Pressable>
+              </View>
+            </ScrollView>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      <Modal
         visible={villageGroupSheetOpen}
         transparent
         animationType="slide"
@@ -1014,7 +1423,9 @@ export function VillageParcelsScreen({ navigation }: Props) {
                   {selectedVillageGroup === "MINE" ? "Benim Tarlam" : "Diğer Parseller"}
                 </Text>
                 <Text style={styles.bottomSheetSubtitle}>
-                  Haritadaki seçili alanın içindeki parseller ve mevcut risk durumları
+                  {selectedVillageGroup === "NEIGHBOR" && selectedNeighborUserName
+                    ? `${selectedNeighborUserName} kullanıcısına ait parseller ve mevcut risk durumları`
+                    : "Haritadaki seçili alanın içindeki parseller ve mevcut risk durumları"}
                 </Text>
               </View>
             </View>
@@ -1228,14 +1639,14 @@ const styles = StyleSheet.create({
   welcomeTitle: { color: "#162234", fontSize: 20, fontWeight: "900" },
   welcomeLocation: { color: "#6B8B61", fontSize: 14, fontWeight: "700" },
   notificationButton: {
-    width: 54,
-    height: 54,
+    minHeight: 54,
+    paddingHorizontal: 18,
     borderRadius: 27,
     backgroundColor: "#FFFFFF",
     alignItems: "center",
     justifyContent: "center",
   },
-  notificationButtonText: { color: "#56657A", fontSize: 20, fontWeight: "700" },
+  notificationButtonText: { color: "#56657A", fontSize: 14, fontWeight: "900", textTransform: "uppercase" },
   weatherCard: {
     borderRadius: 34,
     backgroundColor: "#EEF4EA",
@@ -1422,7 +1833,7 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
   },
   villageParcelLead: { flexDirection: "row", alignItems: "center", gap: 12, flex: 1 },
-  villageParcelIcon: { width: 42, height: 42, borderRadius: 21, backgroundColor: "#FFFFFF" },
+  villageParcelIcon: { width: 42, height: 42, borderRadius: 21, backgroundColor: "#FFFFFF", resizeMode: "contain" },
   villageParcelTitle: { color: "#1E2D20", fontSize: 15, fontWeight: "900" },
   villageParcelSubtitle: { color: "#6B7A67", fontSize: 12, fontWeight: "700", marginTop: 3 },
   selectionCard: {
@@ -1436,7 +1847,7 @@ const styles = StyleSheet.create({
   selectionHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", gap: 12 },
   selectionLead: { flexDirection: "row", alignItems: "center", gap: 14, flex: 1 },
   selectionIconCircle: { width: 68, height: 68, borderRadius: 34, backgroundColor: "#EEF4E8", alignItems: "center", justifyContent: "center" },
-  selectionLeadIcon: { width: 48, height: 48 },
+  selectionLeadIcon: { width: 48, height: 48, resizeMode: "contain" },
   selectionCopy: { flex: 1 },
   selectionTitle: { color: "#162234", fontSize: 18, fontWeight: "900" },
   selectionSubtitle: { color: "#7B8895", fontSize: 14, marginTop: 4 },
@@ -1475,7 +1886,7 @@ const styles = StyleSheet.create({
   cropPickerRow: { gap: 12 },
   cropOptionCard: { width: 120, borderRadius: 24, backgroundColor: "#F7F4EC", borderWidth: 1, borderColor: "#DDD8CC", padding: 12, gap: 10 },
   cropOptionCardActive: { backgroundColor: "#EBF6E8", borderColor: "#B7D2B0" },
-  cropOptionImage: { width: "100%", height: 72, borderRadius: 18, backgroundColor: "#FFFFFF" },
+  cropOptionImage: { width: 88, height: 72, borderRadius: 18, backgroundColor: "#FFFFFF", resizeMode: "contain", alignSelf: "center" },
   cropOptionLabel: { color: "#283627", fontSize: 13, fontWeight: "800", textAlign: "center" },
   emptyState: { borderRadius: 22, backgroundColor: "#F3F4EF", padding: 18, gap: 8 },
   emptyStateTitle: { color: "#2A382A", fontSize: 17, fontWeight: "800" },
@@ -1483,7 +1894,7 @@ const styles = StyleSheet.create({
   scenarioCard: { borderRadius: 22, backgroundColor: "#FFFEFB", borderWidth: 1, borderColor: "#E7E1D6", padding: 16, gap: 8 },
   scenarioTitle: { color: "#243224", fontSize: 18, fontWeight: "800" },
   scenarioCropRow: { flexDirection: "row", alignItems: "center", gap: 8 },
-  scenarioCropIcon: { width: 24, height: 24, borderRadius: 8, backgroundColor: "#F7F7F3" },
+  scenarioCropIcon: { width: 24, height: 24, borderRadius: 8, backgroundColor: "#F7F7F3", resizeMode: "contain" },
   scenarioCrop: { color: "#7B6246", fontSize: 13, fontWeight: "700" },
   scenarioReport: { color: "#5F6D61", fontSize: 14, lineHeight: 21 },
   savedScenarioCard: { borderRadius: 22, backgroundColor: "#FFFEFB", borderWidth: 1, borderColor: "#E7E1D6", padding: 16, gap: 10 },
@@ -1610,7 +2021,7 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
   },
   detailRowLead: { flexDirection: "row", alignItems: "center", gap: 10, flex: 1 },
-  detailRowIcon: { width: 32, height: 32, borderRadius: 10, backgroundColor: "#FFFFFF" },
+  detailRowIcon: { width: 32, height: 32, borderRadius: 10, backgroundColor: "#FFFFFF", resizeMode: "contain" },
   detailRowCopy: { flex: 1 },
   detailRowTitle: { color: "#233123", fontSize: 15, fontWeight: "800" },
   detailRowSubtext: { color: "#6B7A67", fontSize: 12, fontWeight: "600", marginTop: 3 },
@@ -1654,7 +2065,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  neighborIconImage: { width: "100%", height: "100%" },
+  neighborIconImage: { width: "100%", height: "100%", resizeMode: "contain" },
   neighborCopy: { flex: 1 },
   neighborTitle: { color: palette.text, fontSize: 17, fontWeight: "800" },
   neighborDetail: { color: palette.green, fontSize: 15, marginTop: 4 },
@@ -1699,8 +2110,125 @@ const styles = StyleSheet.create({
   bottomMediaText: { color: "#5F6D61", fontSize: 14, lineHeight: 20 },
   bottomSection: { gap: 10 },
   bottomSectionTitle: { color: "#162234", fontSize: 18, fontWeight: "900" },
+  harvestHeroCard: { borderRadius: 32, backgroundColor: "#FCFCF9", padding: 20, gap: 18 },
+  harvestHeroTop: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", gap: 12 },
+  harvestHeroCopy: { flex: 1 },
+  harvestHeroBadge: {
+    borderRadius: 999,
+    backgroundColor: "#E5F4E0",
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  harvestHeroBadgeText: { color: "#3E6F38", fontSize: 12, fontWeight: "900", textTransform: "uppercase" },
+  harvestPrimaryAction: {
+    borderRadius: 26,
+    backgroundColor: "#EEF4EA",
+    padding: 16,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 14,
+  },
+  harvestPrimaryIcon: {
+    width: 46,
+    height: 46,
+    borderRadius: 23,
+    backgroundColor: "#355E3B",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  harvestPrimaryIconText: { color: "#FFFFFF", fontSize: 28, lineHeight: 28, fontWeight: "700" },
+  harvestActionCopy: { flex: 1, gap: 4 },
+  harvestActionTitle: { color: "#1D2A1E", fontSize: 16, fontWeight: "900" },
+  harvestActionText: { color: "#62705F", fontSize: 13, lineHeight: 19 },
+  harvestSectionLead: { flex: 1 },
+  harvestCalendarHeader: {
+    borderRadius: 20,
+    backgroundColor: "#F4F5F0",
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    gap: 4,
+  },
+  harvestCalendarMonth: { color: "#162234", fontSize: 18, fontWeight: "900" },
+  harvestCalendarHint: { color: "#6B7A67", fontSize: 12, fontWeight: "700", textTransform: "uppercase" },
+  harvestAlertCard: { borderRadius: 22, padding: 16, gap: 8 },
+  harvestAlertUrgent: { backgroundColor: "#FFF1EE", borderWidth: 1, borderColor: "#F3C1B8" },
+  harvestAlertSoon: { backgroundColor: "#FFF8E7", borderWidth: 1, borderColor: "#EBCF88" },
+  harvestAlertReady: { backgroundColor: "#EEF6E8", borderWidth: 1, borderColor: "#BED5B3" },
+  harvestAlertHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: 12 },
+  harvestAlertTitle: { color: "#223127", fontSize: 16, fontWeight: "900", flex: 1 },
+  harvestAlertDate: { color: "#7B6246", fontSize: 12, fontWeight: "900", textTransform: "uppercase" },
+  harvestAlertMeta: { color: "#51604D", fontSize: 13, fontWeight: "700" },
+  harvestAlertText: { color: "#5F6D61", fontSize: 14, lineHeight: 21 },
+  harvestCalendarGrid: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
+  harvestDayCard: {
+    width: "22%",
+    minWidth: 72,
+    borderRadius: 22,
+    backgroundColor: "#F5F6F1",
+    paddingVertical: 14,
+    paddingHorizontal: 10,
+    alignItems: "center",
+    gap: 6,
+  },
+  harvestDayCardActive: { backgroundColor: "#E7F3E3", borderWidth: 1, borderColor: "#BED5B3" },
+  harvestDayCardSelected: { backgroundColor: "#355E3B", borderWidth: 1, borderColor: "#355E3B" },
+  harvestWeekLabel: { color: "#8B9488", fontSize: 11, fontWeight: "800", textTransform: "uppercase" },
+  harvestWeekLabelActive: { color: "#497148" },
+  harvestWeekLabelSelected: { color: "#E3F1E1" },
+  harvestDayLabel: { color: "#1E2D20", fontSize: 20, fontWeight: "900" },
+  harvestDayLabelActive: { color: "#2E6D2E" },
+  harvestDayLabelSelected: { color: "#FFFFFF" },
+  harvestPlanCount: { color: "#8B9488", fontSize: 11, fontWeight: "800", textTransform: "uppercase" },
+  harvestPlanCountActive: { color: "#497148" },
+  harvestPlanCountSelected: { color: "#E3F1E1" },
+  harvestTimelineCard: {
+    borderRadius: 24,
+    backgroundColor: "#F7F8F4",
+    padding: 16,
+    gap: 12,
+  },
+  harvestTimelineLead: { flexDirection: "row", alignItems: "center", gap: 12 },
+  harvestTimelineIcon: {
+    width: 58,
+    height: 58,
+    borderRadius: 18,
+    backgroundColor: "#FFFFFF",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  harvestTimelineImage: { width: 42, height: 42, resizeMode: "contain" },
+  harvestTimelineCopy: { flex: 1 },
+  harvestTimelineTitle: { color: "#203021", fontSize: 16, fontWeight: "900" },
+  harvestTimelineMeta: { color: "#687867", fontSize: 13, fontWeight: "700", marginTop: 4 },
+  harvestTimelineNote: { color: "#556461", fontSize: 14, lineHeight: 21 },
+  harvestInput: {
+    minHeight: 56,
+    borderRadius: 18,
+    backgroundColor: "#F3F6EE",
+    paddingHorizontal: 16,
+    color: "#223127",
+    fontSize: 15,
+  },
+  harvestTextarea: {
+    minHeight: 110,
+    borderRadius: 18,
+    backgroundColor: "#F3F6EE",
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    color: "#223127",
+    fontSize: 15,
+    textAlignVertical: "top",
+  },
+  harvestParcelChip: {
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderRadius: 999,
+    backgroundColor: "#F4F5F0",
+  },
+  harvestParcelChipActive: { backgroundColor: "#DCEFD8" },
+  harvestParcelChipText: { color: "#4E5D4C", fontSize: 13, fontWeight: "800" },
+  harvestParcelChipTextActive: { color: "#375436" },
   guideBullet: { color: "#556461", fontSize: 14, lineHeight: 22 },
 });
-
 
 

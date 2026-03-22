@@ -57,9 +57,11 @@ PARCEL_META = {
     for p in PARCELS
 }
 
-DEMO_USERS = {
-    "demo": "demo123",
-    "oguz": "123456",
+USERS = {
+    "demo": {"password": "demo123", "province": "Sakarya", "district": "Serdivan", "village": "Kazimpasa Koyu"},
+    "oguz": {"password": "123456", "province": "Istanbul", "district": "Pendik", "village": "Kurna Koyu"},
+    "zeynep": {"password": "123456", "province": "Ankara", "district": "Polatli", "village": "Basri Koyu"},
+    "mehmet": {"password": "123456", "province": "Konya", "district": "Selcuklu", "village": "Tepekent Koyu"},
 }
 
 INCOMPATIBLE_HIGH = {("corn", "sunflower"), ("sunflower", "corn")}
@@ -92,9 +94,32 @@ class LoginRequest(BaseModel):
     password: str
 
 
+class RegisterRequest(BaseModel):
+    username: str
+    password: str
+    province: str
+    district: str
+    village: str
+
+
 class LoginResponse(BaseModel):
     access_token: str
     token_type: Literal["bearer"] = "bearer"
+    username: str
+    province: str
+    district: str
+    village: str
+
+
+class UserSummary(BaseModel):
+    username: str
+    province: str
+    district: str
+    village: str
+
+
+class UsersResponse(BaseModel):
+    users: list[UserSummary]
 
 
 class ParcelItem(BaseModel):
@@ -192,9 +217,63 @@ def health() -> dict[str, str]:
 
 @app.post("/api/v1/auth/login", response_model=LoginResponse)
 def login(payload: LoginRequest) -> LoginResponse:
-    if DEMO_USERS.get(payload.username) != payload.password:
+    username = payload.username.strip().lower()
+    user = USERS.get(username)
+    if user is None or user["password"] != payload.password:
         raise HTTPException(status_code=401, detail="Invalid username or password")
-    return LoginResponse(access_token=f"demo-token-{payload.username}")
+    return LoginResponse(
+        access_token=f"demo-token-{username}",
+        username=username,
+        province=user["province"],
+        district=user["district"],
+        village=user["village"],
+    )
+
+
+@app.post("/api/v1/auth/register", response_model=LoginResponse)
+def register(payload: RegisterRequest) -> LoginResponse:
+    username = payload.username.strip().lower()
+    password = payload.password.strip()
+    province = payload.province.strip()
+    district = payload.district.strip()
+    village = payload.village.strip()
+
+    if len(username) < 3:
+        raise HTTPException(status_code=400, detail="Username must be at least 3 characters")
+    if len(password) < 6:
+        raise HTTPException(status_code=400, detail="Password must be at least 6 characters")
+    if len(province) < 2:
+        raise HTTPException(status_code=400, detail="Province is required")
+    if len(district) < 2:
+        raise HTTPException(status_code=400, detail="District is required")
+    if len(village) < 2:
+        raise HTTPException(status_code=400, detail="Village is required")
+    if username in USERS:
+        raise HTTPException(status_code=409, detail="Username already exists")
+
+    USERS[username] = {"password": password, "province": province, "district": district, "village": village}
+    return LoginResponse(
+        access_token=f"demo-token-{username}",
+        username=username,
+        province=province,
+        district=district,
+        village=village,
+    )
+
+
+@app.get("/api/v1/users", response_model=UsersResponse)
+def list_users() -> UsersResponse:
+    return UsersResponse(
+        users=[
+            UserSummary(
+                username=username,
+                province=data["province"],
+                district=data["district"],
+                village=data["village"],
+            )
+            for username, data in sorted(USERS.items())
+        ]
+    )
 
 
 @app.get("/api/v1/villages/{village_id}/parcels", response_model=ParcelListResponse)
