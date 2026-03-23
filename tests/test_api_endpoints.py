@@ -9,6 +9,7 @@ def test_login_and_parcels_flow():
     login = client.post("/api/v1/auth/login", json={"username": "demo", "password": "demo123"})
     assert login.status_code == 200
     assert "access_token" in login.json()
+    assert login.json()["province"] == "Sakarya"
 
     parcels = client.get("/api/v1/villages/v1/parcels")
     assert parcels.status_code == 200
@@ -39,3 +40,47 @@ def test_layout_neighbors_score_decision_flow():
     decision = client.get("/api/v1/parcels/a_p1/decision", params={"season": "2026_Spring"})
     assert decision.status_code == 200
     assert decision.json()["parcel_id"] == "a_p1"
+
+
+def test_register_and_list_users_flow():
+    register = client.post(
+        "/api/v1/auth/register",
+        json={
+            "username": "backend_case",
+            "password": "secure123",
+            "province": "Ankara",
+            "district": "Bala",
+            "village": "Bala Asagi Koyu",
+        },
+    )
+    assert register.status_code == 200
+    assert register.json()["username"] == "backend_case"
+    assert register.json()["district"] == "Bala"
+
+    users = client.get("/api/v1/users")
+    assert users.status_code == 200
+    payload = users.json()["users"]
+    assert any(item["username"] == "backend_case" for item in payload)
+
+
+def test_invalid_contract_cases():
+    bad_login = client.post("/api/v1/auth/login", json={"username": "demo", "password": "wrong"})
+    assert bad_login.status_code == 401
+
+    duplicate_register = client.post(
+        "/api/v1/auth/register",
+        json={
+            "username": "demo",
+            "password": "demo123",
+            "province": "Sakarya",
+            "district": "Serdivan",
+            "village": "Kazimpasa Koyu",
+        },
+    )
+    assert duplicate_register.status_code == 409
+
+    bad_village = client.get("/api/v1/villages/unknown/parcels")
+    assert bad_village.status_code == 404
+
+    bad_neighbors = client.get("/api/v2/parcels/unknown/neighbors", params={"season": "2026_Spring"})
+    assert bad_neighbors.status_code == 404

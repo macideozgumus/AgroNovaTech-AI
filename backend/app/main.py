@@ -13,6 +13,19 @@ from backend.app.decision_engine import combine_rules_with_ml, compute_rules_sco
 from backend.app.models.decision_result import DecisionResult
 from backend.app.repositories.decision_repository import get_decision as repo_get_decision
 from backend.app.repositories.decision_repository import upsert_decision
+from backend.app.services.auth_service import authenticate_user, list_users as auth_list_users, register_user
+from backend.app.services.village_service import (
+    PARCELS,
+    PLOTS,
+    VALID_LAYOUTS,
+    ensure_parcel,
+    ensure_village,
+    get_layout,
+    get_neighbor_ids,
+    get_parcel_crop,
+    list_parcels as village_list_parcels,
+    update_layout,
+)
 
 app = FastAPI(title="AgroNova Mobile API", version="2.2")
 
@@ -33,57 +46,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-VALID_LAYOUTS = {"top", "right", "bottom", "left"}
-FIELD_LAYOUT_POSITION = "top"
-
-PARCELS = [
-    "a_p1", "a_p2", "a_p3", "a_p4", "a_p5", "a_p6", "a_p7", "a_p8",
-    "b_p1", "b_p2", "b_p3", "b_p4", "b_p5", "b_p6", "b_p7", "b_p8",
-]
-
-PLOTS = {
-    "a_p1": "corn", "a_p2": "sunflower", "a_p3": "wheat", "a_p4": "corn",
-    "a_p5": "corn", "a_p6": "barley", "a_p7": "wheat", "a_p8": "corn",
-    "b_p1": "sunflower", "b_p2": "wheat", "b_p3": "corn", "b_p4": "barley",
-    "b_p5": "sunflower", "b_p6": "wheat", "b_p7": "corn", "b_p8": "barley",
-}
-
-PARCEL_META = {
-    p: {
-        "parcel_id": p,
-        "field_block": "A" if p.startswith("a_") else "B",
-        "planned_crop": PLOTS[p],
-    }
-    for p in PARCELS
-}
-
-USERS = {
-    "demo": {"password": "demo123", "province": "Sakarya", "district": "Serdivan", "village": "Kazimpasa Koyu"},
-    "oguz": {"password": "123456", "province": "Istanbul", "district": "Pendik", "village": "Kurna Koyu"},
-    "zeynep": {"password": "123456", "province": "Ankara", "district": "Polatli", "village": "Basri Koyu"},
-    "mehmet": {"password": "123456", "province": "Konya", "district": "Selcuklu", "village": "Tepekent Koyu"},
-}
-
 INCOMPATIBLE_HIGH = {("corn", "sunflower"), ("sunflower", "corn")}
 INCOMPATIBLE_MEDIUM = {
     ("corn", "wheat"),
     ("wheat", "corn"),
     ("sunflower", "wheat"),
     ("wheat", "sunflower"),
-}
-
-INTRA_NEIGHBORS = {
-    "a_p1": ["a_p2", "a_p5"], "a_p2": ["a_p1", "a_p3", "a_p6"], "a_p3": ["a_p2", "a_p4", "a_p7"], "a_p4": ["a_p3", "a_p8"],
-    "a_p5": ["a_p1", "a_p6"], "a_p6": ["a_p2", "a_p5", "a_p7"], "a_p7": ["a_p3", "a_p6", "a_p8"], "a_p8": ["a_p4", "a_p7"],
-    "b_p1": ["b_p2", "b_p5"], "b_p2": ["b_p1", "b_p3", "b_p6"], "b_p3": ["b_p2", "b_p4", "b_p7"], "b_p4": ["b_p3", "b_p8"],
-    "b_p5": ["b_p1", "b_p6"], "b_p6": ["b_p2", "b_p5", "b_p7"], "b_p7": ["b_p3", "b_p6", "b_p8"], "b_p8": ["b_p4", "b_p7"],
-}
-
-INTER_BY_LAYOUT = {
-    "top": {"a_p1": ["b_p5"], "a_p2": ["b_p6"], "a_p3": ["b_p7"], "a_p4": ["b_p8"]},
-    "right": {"a_p2": ["b_p1"], "a_p4": ["b_p3"], "a_p6": ["b_p5"], "a_p8": ["b_p7"]},
-    "bottom": {"a_p5": ["b_p1"], "a_p6": ["b_p2"], "a_p7": ["b_p3"], "a_p8": ["b_p4"]},
-    "left": {"a_p1": ["b_p2"], "a_p3": ["b_p4"], "a_p5": ["b_p6"], "a_p7": ["b_p8"]},
 }
 
 LATENCY_SAMPLES_MS: deque[float] = deque(maxlen=100)
@@ -204,12 +172,6 @@ def _classify_pair(a: str, b: str) -> str:
     return "ok"
 
 
-def _neighbors_for(parcel_id: str) -> tuple[list[str], list[str]]:
-    intra = INTRA_NEIGHBORS.get(parcel_id, [])
-    inter = INTER_BY_LAYOUT[FIELD_LAYOUT_POSITION].get(parcel_id, [])
-    return intra, inter
-
-
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
@@ -217,10 +179,7 @@ def health() -> dict[str, str]:
 
 @app.post("/api/v1/auth/login", response_model=LoginResponse)
 def login(payload: LoginRequest) -> LoginResponse:
-    username = payload.username.strip().lower()
-    user = USERS.get(username)
-    if user is None or user["password"] != payload.password:
-        raise HTTPException(status_code=401, detail="Invalid username or password")
+    username, user = authenticate_user(payload.username, payload.password)
     return LoginResponse(
         access_token=f"demo-token-{username}",
         username=username,
@@ -232,53 +191,30 @@ def login(payload: LoginRequest) -> LoginResponse:
 
 @app.post("/api/v1/auth/register", response_model=LoginResponse)
 def register(payload: RegisterRequest) -> LoginResponse:
-    username = payload.username.strip().lower()
-    password = payload.password.strip()
-    province = payload.province.strip()
-    district = payload.district.strip()
-    village = payload.village.strip()
-
-    if len(username) < 3:
-        raise HTTPException(status_code=400, detail="Username must be at least 3 characters")
-    if len(password) < 6:
-        raise HTTPException(status_code=400, detail="Password must be at least 6 characters")
-    if len(province) < 2:
-        raise HTTPException(status_code=400, detail="Province is required")
-    if len(district) < 2:
-        raise HTTPException(status_code=400, detail="District is required")
-    if len(village) < 2:
-        raise HTTPException(status_code=400, detail="Village is required")
-    if username in USERS:
-        raise HTTPException(status_code=409, detail="Username already exists")
-
-    USERS[username] = {"password": password, "province": province, "district": district, "village": village}
+    username, user = register_user(
+        username=payload.username,
+        password=payload.password,
+        province=payload.province,
+        district=payload.district,
+        village=payload.village,
+    )
     return LoginResponse(
         access_token=f"demo-token-{username}",
         username=username,
-        province=province,
-        district=district,
-        village=village,
+        province=user["province"],
+        district=user["district"],
+        village=user["village"],
     )
 
 
 @app.get("/api/v1/users", response_model=UsersResponse)
 def list_users() -> UsersResponse:
-    return UsersResponse(
-        users=[
-            UserSummary(
-                username=username,
-                province=data["province"],
-                district=data["district"],
-                village=data["village"],
-            )
-            for username, data in sorted(USERS.items())
-        ]
-    )
+    return UsersResponse(users=[UserSummary(**item) for item in auth_list_users()])
 
 
 @app.get("/api/v1/villages/{village_id}/parcels", response_model=ParcelListResponse)
 def list_parcels(village_id: str) -> ParcelListResponse:
-    return ParcelListResponse(village_id=village_id, parcels=[ParcelItem(**PARCEL_META[p]) for p in PARCELS])
+    return ParcelListResponse(village_id=village_id, parcels=[ParcelItem(**item) for item in village_list_parcels(village_id)])
 
 
 @app.get("/api/v1/metrics/latency")
@@ -303,35 +239,32 @@ def latency_metrics() -> dict:
 
 @app.put("/api/v2/villages/{village_id}/field-layout", response_model=FieldLayoutResponse)
 def put_field_layout(village_id: str, payload: FieldLayoutUpdateRequest) -> FieldLayoutResponse:
-    global FIELD_LAYOUT_POSITION
-    FIELD_LAYOUT_POSITION = payload.field_layout_position
+    next_position = update_layout(village_id, payload.field_layout_position)
     return FieldLayoutResponse(
         village_id=village_id,
-        field_layout_position=payload.field_layout_position,
+        field_layout_position=next_position,
         valid_positions=sorted(VALID_LAYOUTS),
-        message=f"Tarla B konumu {payload.field_layout_position} olarak guncellendi.",
+        message=f"Tarla B konumu {next_position} olarak guncellendi.",
     )
 
 
 @app.get("/api/v2/villages/{village_id}/field-layout", response_model=FieldLayoutResponse)
 def get_field_layout(village_id: str) -> FieldLayoutResponse:
+    ensure_village(village_id)
     return FieldLayoutResponse(
         village_id=village_id,
-        field_layout_position=FIELD_LAYOUT_POSITION,
+        field_layout_position=get_layout(),
         valid_positions=sorted(VALID_LAYOUTS),
     )
 
 
 @app.get("/api/v2/parcels/{parcel_id}/neighbors", response_model=NeighborsResponse)
 def get_neighbors(parcel_id: str, season: str = Query(...)) -> NeighborsResponse:
-    if parcel_id not in PARCELS:
-        raise HTTPException(status_code=404, detail="Parcel not found")
-
-    intra, inter = _neighbors_for(parcel_id)
+    intra, inter = get_neighbor_ids(parcel_id)
     return NeighborsResponse(
         parcel_id=parcel_id,
         season=season,
-        layout_position=FIELD_LAYOUT_POSITION,
+        layout_position=get_layout(),
         neighbors={
             "intra_block": [{"parcel_id": n, "adjacency_type": "INTRA_BLOCK"} for n in intra],
             "inter_block": [{"parcel_id": n, "adjacency_type": "INTER_BLOCK"} for n in inter],
@@ -341,11 +274,10 @@ def get_neighbors(parcel_id: str, season: str = Query(...)) -> NeighborsResponse
 
 @app.post("/api/v1/decision/score", response_model=DecisionResponse)
 def score_decision(payload: ScoreRequest) -> DecisionResponse:
-    if payload.parcel_id not in PARCELS:
-        raise HTTPException(status_code=404, detail="Parcel not found")
+    ensure_parcel(payload.parcel_id)
 
-    intra_ids, inter_ids = _neighbors_for(payload.parcel_id)
-    crop = PLOTS[payload.parcel_id]
+    intra_ids, inter_ids = get_neighbor_ids(payload.parcel_id)
+    crop = get_parcel_crop(payload.parcel_id)
 
     intra_high = intra_medium = intra_same = 0
     inter_high = inter_medium = inter_same = 0
