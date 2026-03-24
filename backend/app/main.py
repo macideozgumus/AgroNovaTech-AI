@@ -25,7 +25,12 @@ from backend.app.services.optimizer_service import (
     ResearchPlan,
     build_graph,
 )
-from backend.app.services.llm_service import chat_about_plan, explain_plan_with_llm, generate_what_if_analysis
+from backend.app.services.llm_service import (
+    chat_about_plan,
+    explain_plan_with_llm,
+    generate_what_if_analysis,
+    get_llm_provider_status,
+)
 from backend.app.services.rules_service import validate_plan
 from backend.app.services.scenario_service import create_scenario, get_scenario, list_scenarios, recommend_scenarios
 from backend.app.services.village_service import (
@@ -108,6 +113,12 @@ class UsersResponse(BaseModel):
     users: list[UserSummary]
 
 
+class AIStatusResponse(BaseModel):
+    enabled: bool
+    provider: Optional[str]
+    reason: str
+
+
 class ParcelItem(BaseModel):
     parcel_id: str
     field_block: Literal["A", "B"]
@@ -187,6 +198,7 @@ class ScenarioPlanResponse(BaseModel):
     selections: list[ScenarioParcelSelection]
     rules_passed: bool
     rules_warnings: list[str]
+    llm_provider: str
     llm_explanation: str
     what_if: list[str]
 
@@ -324,6 +336,12 @@ def register(payload: RegisterRequest) -> LoginResponse:
 @app.get("/api/v1/users", response_model=UsersResponse)
 def list_users() -> UsersResponse:
     return UsersResponse(users=[UserSummary(**item) for item in auth_list_users()])
+
+
+@app.get("/api/v1/ai/status", response_model=AIStatusResponse)
+def ai_status() -> AIStatusResponse:
+    status = get_llm_provider_status()
+    return AIStatusResponse(enabled=status.enabled, provider=status.provider, reason=status.reason)
 
 
 @app.get("/api/v1/villages/{village_id}/parcels", response_model=ParcelListResponse)
@@ -497,6 +515,7 @@ def _map_research_plan(plan: ResearchPlan, final_rank: int, neighbor_info: dict)
         selections=[ScenarioParcelSelection(**item) for item in plan["selections"]],
         rules_passed=validation.rules_passed,
         rules_warnings=validation.rules_warnings,
+        llm_provider=explanation.provider,
         llm_explanation=explanation.summary_tr,
         what_if=[item.impact_summary for item in what_if],
     )
@@ -574,6 +593,7 @@ class ScenarioChatRequest(BaseModel):
 class ScenarioChatResponse(BaseModel):
     reply: str
     suggestions: list[str]
+    provider: str
 
 
 @app.post("/api/v1/scenario/chat", response_model=ScenarioChatResponse)
@@ -589,4 +609,5 @@ def scenario_chat(payload: ScenarioChatRequest) -> ScenarioChatResponse:
     return ScenarioChatResponse(
         reply=result.reply,
         suggestions=result.suggestions,
+        provider=result.provider,
     )

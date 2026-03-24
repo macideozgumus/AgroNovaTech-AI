@@ -36,6 +36,12 @@ export interface UsersResponse {
   users: UserSummary[];
 }
 
+export interface AIStatusResponse {
+  enabled: boolean;
+  provider: string | null;
+  reason: string;
+}
+
 export interface ParcelItem {
   parcel_id: string;
   field_block: "A" | "B";
@@ -123,6 +129,7 @@ export interface ScenarioPlan {
   selections: ScenarioPlanParcel[];
   rules_passed: boolean;
   rules_warnings: string[];
+  llm_provider: string;
   llm_explanation: string;
   what_if: string[];
 }

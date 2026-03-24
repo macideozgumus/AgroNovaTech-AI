@@ -2,6 +2,7 @@
 
 import { loadAuthToken } from "./cache";
 import type {
+  AIStatusResponse,
   DecisionResponse,
   FieldLayoutPosition,
   FieldLayoutResponse,
@@ -105,6 +106,10 @@ export const apiClient = {
 
   getUsers() {
     return requestJson<UsersResponse>("/api/v1/users");
+  },
+
+  getAIStatus() {
+    return requestJson<AIStatusResponse>("/api/v1/ai/status");
   },
 
   getParcels(villageId: string) {

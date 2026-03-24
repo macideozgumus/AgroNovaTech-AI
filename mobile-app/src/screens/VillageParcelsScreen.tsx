@@ -262,6 +262,7 @@ export function VillageParcelsScreen({ navigation }: Props) {
   const [selectedVillageGroup, setSelectedVillageGroup] = useState<VillageGroupKey>("MINE");
   const [selectedNeighborUserName, setSelectedNeighborUserName] = useState<string | null>(null);
   const [authProfile, setAuthProfile] = useState<{ username: string; province: string; district: string; village: string } | null>(null);
+  const [geminiEnabled, setGeminiEnabled] = useState(false);
   const [communityUsers, setCommunityUsers] = useState<UserSummary[]>([]);
   const [harvestPlanModalOpen, setHarvestPlanModalOpen] = useState(false);
   const [harvestDraftTitle, setHarvestDraftTitle] = useState("Yeni hasat operasyonu");
@@ -366,15 +367,21 @@ export function VillageParcelsScreen({ navigation }: Props) {
 
     const loadSessionData = async () => {
       try {
-        const [profile, usersResponse] = await Promise.all([loadAuthProfile(), apiClient.getUsers()]);
+        const [profile, usersResponse, aiStatus] = await Promise.all([
+          loadAuthProfile(),
+          apiClient.getUsers(),
+          apiClient.getAIStatus(),
+        ]);
         if (mounted) {
           setAuthProfile(profile);
           setCommunityUsers(usersResponse.users);
+          setGeminiEnabled(aiStatus.enabled && aiStatus.provider === "gemini");
         }
       } catch {
         const profile = await loadAuthProfile();
         if (mounted) {
           setAuthProfile(profile);
+          setGeminiEnabled(false);
         }
       }
     };
@@ -685,7 +692,10 @@ export function VillageParcelsScreen({ navigation }: Props) {
             <Text style={styles.avatarGlyph}>🌿</Text>
           </View>
           <View style={styles.welcomeCopy}>
-            <Text style={styles.welcomeTitle}>{authProfile?.username ?? "Hoş Geldiniz!"}</Text>
+            <View style={styles.welcomeTitleRow}>
+              <Text style={styles.welcomeTitle}>{authProfile?.username ?? "Hoş Geldiniz!"}</Text>
+              {geminiEnabled ? <View style={styles.geminiStatusDot} /> : null}
+            </View>
             <Text style={styles.welcomeLocation}>
               {authProfile ? `${authProfile.province} / ${authProfile.district} / ${authProfile.village}` : "Sakarya / Serdivan / Kazimpasa Koyu"}
             </Text>
@@ -1801,7 +1811,18 @@ const styles = StyleSheet.create({
   },
   avatarGlyph: { fontSize: 28 },
   welcomeCopy: { flex: 1, gap: 3 },
+  welcomeTitleRow: { flexDirection: "row", alignItems: "center", gap: 8 },
   welcomeTitle: { color: "#162234", fontSize: 20, fontWeight: "900" },
+  geminiStatusDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 999,
+    backgroundColor: "#27C468",
+    shadowColor: "#27C468",
+    shadowOpacity: 0.28,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 0 },
+  },
   welcomeLocation: { color: "#6B8B61", fontSize: 14, fontWeight: "700", flexShrink: 1 },
   notificationButton: {
     width: 86,

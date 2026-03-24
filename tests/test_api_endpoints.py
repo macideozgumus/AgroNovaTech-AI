@@ -62,6 +62,11 @@ def test_register_and_list_users_flow():
     payload = users.json()["users"]
     assert any(item["username"] == "backend_case" for item in payload)
 
+    ai_status = client.get("/api/v1/ai/status")
+    assert ai_status.status_code == 200
+    assert ai_status.json()["enabled"] is False
+    assert ai_status.json()["provider"] is None
+
 
 def test_invalid_contract_cases():
     bad_login = client.post("/api/v1/auth/login", json={"username": "demo", "password": "wrong"})
@@ -214,6 +219,7 @@ def test_scenario_chat_endpoint():
     assert "reply" in body
     assert isinstance(body["suggestions"], list)
     assert len(body["suggestions"]) > 0
+    assert body["provider"] in {"fallback", "gemini"}
     assert "optimizer" in body["reply"] or "skor motoru" in body["reply"] or "planı" in body["reply"]
 
 
@@ -242,6 +248,7 @@ def test_scenario_plan_response_new_fields():
     assert "final_rank" in first_plan
     assert "rules_passed" in first_plan
     assert "rules_warnings" in first_plan
+    assert "llm_provider" in first_plan
     assert "llm_explanation" in first_plan
     assert "what_if" in first_plan
     assert isinstance(first_plan["optimizer_score"], (int, float))
@@ -249,6 +256,7 @@ def test_scenario_plan_response_new_fields():
     assert first_plan["final_rank"] == 1
     assert isinstance(first_plan["rules_passed"], bool)
     assert isinstance(first_plan["rules_warnings"], list)
+    assert first_plan["llm_provider"] in {"fallback", "gemini"}
     assert isinstance(first_plan["llm_explanation"], str)
     assert first_plan["llm_explanation"]
     assert isinstance(first_plan["what_if"], list)
