@@ -218,6 +218,40 @@ export function VillageParcelsScreen({ navigation }: Props) {
   const [selectedHarvestDate, setSelectedHarvestDate] = useState("2026-03-24");
   const [harvestPlans, setHarvestPlans] = useState<HarvestPlanView[]>([]);
 
+  const buildCropOverrides = useCallback(
+    (drafts: Record<string, ParcelDraft>) =>
+      Object.fromEntries(
+        parcels.map((parcel) => [
+          parcel.parcel_id,
+          (drafts[parcel.parcel_id]?.cropKey ?? (parcel.planned_crop as CropKey)) as CropKey,
+        ]),
+      ),
+    [parcels],
+  );
+
+  const recomputeDraftDecisions = useCallback(
+    async (drafts: Record<string, ParcelDraft>) => {
+      if (parcels.length === 0) {
+        return;
+      }
+
+      const cropOverrides = buildCropOverrides(drafts);
+      const entries = await Promise.all(
+        parcels.map(async (parcel) => [
+          parcel.parcel_id,
+          await apiClient.scoreDecision({
+            village_id: "v1",
+            season: DEFAULT_SEASON,
+            parcel_id: parcel.parcel_id,
+            crop_overrides: cropOverrides,
+          }),
+        ] as const),
+      );
+      setDecisions(Object.fromEntries(entries));
+    },
+    [buildCropOverrides, parcels],
+  );
+
   useEffect(() => {
     let mounted = true;
 
@@ -230,8 +264,6 @@ export function VillageParcelsScreen({ navigation }: Props) {
             village_id: "v1",
             season: DEFAULT_SEASON,
             parcel_id: parcel.parcel_id,
-            ml_score: 62.5,
-            ml_confidence: 0.7,
           });
         }
         throw error;
@@ -1271,15 +1303,17 @@ export function VillageParcelsScreen({ navigation }: Props) {
                             styles.cropOptionCard,
                             selectedCropKey === option.key && styles.cropOptionCardActive,
                           ]}
-                          onPress={() =>
-                            setParcelDrafts((current) => ({
-                              ...current,
+                          onPress={() => {
+                            const nextDrafts = {
+                              ...parcelDrafts,
                               [selectedParcel.parcel_id]: {
                                 cropKey: option.key,
-                                neighborEnabled: current[selectedParcel.parcel_id]?.neighborEnabled ?? true,
+                                neighborEnabled: parcelDrafts[selectedParcel.parcel_id]?.neighborEnabled ?? true,
                               },
-                            }))
-                          }
+                            };
+                            setParcelDrafts(nextDrafts);
+                            void recomputeDraftDecisions(nextDrafts);
+                          }}
                         >
                           <Image source={getCropImageSource(option.key)} style={styles.cropOptionImage} />
                           <Text style={styles.cropOptionLabel}>{option.label}</Text>
@@ -1296,15 +1330,17 @@ export function VillageParcelsScreen({ navigation }: Props) {
                       </View>
                       <Pressable
                         style={[styles.toggleSwitch, !selectedNeighborEnabled && styles.toggleSwitchPassive]}
-                        onPress={() =>
-                          setParcelDrafts((current) => ({
-                            ...current,
+                        onPress={() => {
+                          const nextDrafts = {
+                            ...parcelDrafts,
                             [selectedParcel.parcel_id]: {
-                              cropKey: current[selectedParcel.parcel_id]?.cropKey ?? (selectedParcel.planned_crop as CropKey),
-                              neighborEnabled: !(current[selectedParcel.parcel_id]?.neighborEnabled ?? true),
+                              cropKey: parcelDrafts[selectedParcel.parcel_id]?.cropKey ?? (selectedParcel.planned_crop as CropKey),
+                              neighborEnabled: !(parcelDrafts[selectedParcel.parcel_id]?.neighborEnabled ?? true),
                             },
-                          }))
-                        }
+                          };
+                          setParcelDrafts(nextDrafts);
+                          void recomputeDraftDecisions(nextDrafts);
+                        }}
                       >
                         <View style={[styles.toggleKnob, !selectedNeighborEnabled && styles.toggleKnobPassive]} />
                       </Pressable>

@@ -141,6 +141,7 @@ class ScoreRequest(BaseModel):
     parcel_id: str
     ml_score: Optional[float] = Field(default=None, ge=0, le=100)
     ml_confidence: Optional[float] = Field(default=None, ge=0, le=1)
+    crop_overrides: Optional[dict[str, CropKey]] = None
 
 
 class DecisionResponse(BaseModel):
@@ -381,7 +382,8 @@ def score_decision(payload: ScoreRequest) -> DecisionResponse:
     ensure_parcel(payload.parcel_id)
 
     intra_ids, inter_ids = get_neighbor_ids(payload.parcel_id)
-    crop = get_parcel_crop(payload.parcel_id)
+    crop_overrides = payload.crop_overrides or {}
+    crop = crop_overrides.get(payload.parcel_id, get_parcel_crop(payload.parcel_id))
 
     intra_high = intra_medium = intra_same = 0
     inter_high = inter_medium = inter_same = 0
@@ -389,7 +391,8 @@ def score_decision(payload: ScoreRequest) -> DecisionResponse:
     reasons: list[str] = []
 
     for neighbor_id in intra_ids:
-        pair_type = _classify_pair(crop, PLOTS[neighbor_id])
+        neighbor_crop = crop_overrides.get(neighbor_id, PLOTS[neighbor_id])
+        pair_type = _classify_pair(crop, neighbor_crop)
         if pair_type == "high":
             intra_high += 1
         elif pair_type == "medium":
@@ -398,7 +401,8 @@ def score_decision(payload: ScoreRequest) -> DecisionResponse:
             intra_same += 1
 
     for neighbor_id in inter_ids:
-        pair_type = _classify_pair(crop, PLOTS[neighbor_id])
+        neighbor_crop = crop_overrides.get(neighbor_id, PLOTS[neighbor_id])
+        pair_type = _classify_pair(crop, neighbor_crop)
         if pair_type == "high":
             inter_high += 1
         elif pair_type == "medium":

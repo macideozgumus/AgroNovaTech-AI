@@ -142,7 +142,7 @@ function buildHtml(
 
         features.forEach((feature) => {
           const borderWeight = feature.id === selectedId ? 5 : 3;
-          const fillOpacity = feature.mine ? 0.46 : 0.18;
+          const fillOpacity = feature.mine ? 0.58 : 0.32;
           const polygon = L.polygon(feature.coordinates, {
             color: feature.borderColor,
             weight: borderWeight,
@@ -221,7 +221,7 @@ export function LeafletParcelMap({
             name: group.name,
             riskText: tone.text,
             color: tone.fieldFill,
-            borderColor: group.mine ? "#2F7D44" : "#8F7A62",
+            borderColor: tone.fieldBorder,
             mine: group.mine,
             cropKey: leadItem.cropKey,
             cropIcon:
@@ -241,7 +241,7 @@ export function LeafletParcelMap({
         name: getFriendlyParcelName(item.parcel.parcel_id),
         riskText: tone.text,
         color: tone.fieldFill,
-        borderColor: item.isMine ? "#2F7D44" : "#8F7A62",
+        borderColor: tone.fieldBorder,
         mine: item.isMine,
         cropKey: item.cropKey,
         cropIcon:

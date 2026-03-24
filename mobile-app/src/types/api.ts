@@ -75,6 +75,7 @@ export interface ScoreRequest {
   parcel_id: string;
   ml_score?: number;
   ml_confidence?: number;
+  crop_overrides?: Record<string, CropKey>;
 }
 
 export interface DecisionResponse {
