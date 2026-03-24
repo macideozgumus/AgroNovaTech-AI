@@ -116,8 +116,15 @@ export interface ScenarioPlan {
   balanced_count: number;
   risky_count: number;
   critical_count: number;
+  optimizer_score: number;
+  final_score: number;
+  final_rank: number;
   reason_list: string[];
   selections: ScenarioPlanParcel[];
+  rules_passed: boolean;
+  rules_warnings: string[];
+  llm_explanation: string;
+  what_if: string[];
 }
 
 export interface ScenarioRecommendResponse {

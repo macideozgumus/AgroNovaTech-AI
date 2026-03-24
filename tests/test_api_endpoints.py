@@ -199,7 +199,7 @@ def test_scenario_harvest_and_ai_edge_cases():
 
 
 def test_scenario_chat_endpoint():
-    """POST /api/v1/scenario/chat — LLM henüz aktif değilken placeholder yanıt döner."""
+    """POST /api/v1/scenario/chat — açıklama katmanı doğal dil yanıt döner."""
     resp = client.post(
         "/api/v1/scenario/chat",
         json={
@@ -214,6 +214,7 @@ def test_scenario_chat_endpoint():
     assert "reply" in body
     assert isinstance(body["suggestions"], list)
     assert len(body["suggestions"]) > 0
+    assert "optimizer" in body["reply"] or "skor motoru" in body["reply"] or "planı" in body["reply"]
 
 
 def test_scenario_chat_missing_fields():
@@ -230,14 +231,25 @@ def test_scenario_chat_missing_fields():
 
 
 def test_scenario_plan_response_new_fields():
-    """Recommend response'unda yeni opsiyonel alanlar null olarak dönmeli."""
+    """Recommend response'unda hybrid mimari alanları dolu olarak dönmeli."""
     resp = client.post("/api/v1/scenario/recommend", json={"village_id": "v1", "season": "2026_Spring"})
     assert resp.status_code == 200
     plans = resp.json()["plans"]
     assert len(plans) > 0
     first_plan = plans[0]
-    # Yeni alanlar mevcut ve null
+    assert "optimizer_score" in first_plan
+    assert "final_score" in first_plan
+    assert "final_rank" in first_plan
     assert "rules_passed" in first_plan
     assert "rules_warnings" in first_plan
     assert "llm_explanation" in first_plan
     assert "what_if" in first_plan
+    assert isinstance(first_plan["optimizer_score"], (int, float))
+    assert isinstance(first_plan["final_score"], (int, float))
+    assert first_plan["final_rank"] == 1
+    assert isinstance(first_plan["rules_passed"], bool)
+    assert isinstance(first_plan["rules_warnings"], list)
+    assert isinstance(first_plan["llm_explanation"], str)
+    assert first_plan["llm_explanation"]
+    assert isinstance(first_plan["what_if"], list)
+    assert len(first_plan["what_if"]) > 0

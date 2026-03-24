@@ -19,7 +19,15 @@ import { clearAuthSession, loadAuthProfile } from "../api/cache";
 import { LeafletParcelMap } from "../components/LeafletParcelMap";
 import { sortReasonCodes } from "../components/reasons";
 import { RootStackParamList } from "../navigation/AppNavigator";
-import type { DecisionResponse, HarvestPlan as ApiHarvestPlan, ParcelItem, RiskLevel, ScenarioItem, UserSummary } from "../types/api";
+import type {
+  CropKey,
+  DecisionResponse,
+  HarvestPlan as ApiHarvestPlan,
+  ParcelItem,
+  RiskLevel,
+  ScenarioItem,
+  UserSummary,
+} from "../types/api";
 import {
   cropVisuals,
   getCropImageSource,
@@ -27,7 +35,6 @@ import {
   getFriendlyParcelSubtitle,
   getParcelArea,
   riskTone,
-  type CropKey,
 } from "../utils/farmUi";
 
 type Props = NativeStackScreenProps<RootStackParamList, "VillageParcels">;
@@ -264,13 +271,13 @@ export function VillageParcelsScreen({ navigation }: Props) {
   const [harvestPlans, setHarvestPlans] = useState<HarvestPlanView[]>([]);
 
   const buildCropOverrides = useCallback(
-    (drafts: Record<string, ParcelDraft>) =>
+    (drafts: Record<string, ParcelDraft>): Record<string, CropKey> =>
       Object.fromEntries(
         parcels.map((parcel) => [
           parcel.parcel_id,
           (drafts[parcel.parcel_id]?.cropKey ?? (parcel.planned_crop as CropKey)) as CropKey,
         ]),
-      ),
+      ) as Record<string, CropKey>,
     [parcels],
   );
 

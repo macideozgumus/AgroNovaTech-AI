@@ -7,6 +7,8 @@ __pycache__/
 *.pyo
 *.pyd
 .venv/
+.venv-backend-tests/
+.venv-backend-tests-win/
 backend/.venv/
 
 # OS / IDE

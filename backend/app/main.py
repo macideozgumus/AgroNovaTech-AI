@@ -25,7 +25,8 @@ from backend.app.services.optimizer_service import (
     ResearchPlan,
     build_graph,
 )
-from backend.app.services.llm_service import chat_about_plan
+from backend.app.services.llm_service import chat_about_plan, explain_plan_with_llm, generate_what_if_analysis
+from backend.app.services.rules_service import validate_plan
 from backend.app.services.scenario_service import create_scenario, get_scenario, list_scenarios, recommend_scenarios
 from backend.app.services.village_service import (
     PARCELS,
@@ -179,13 +180,15 @@ class ScenarioPlanResponse(BaseModel):
     balanced_count: int
     risky_count: int
     critical_count: int
+    optimizer_score: float
+    final_score: float
+    final_rank: int
     reason_list: list[str]
     selections: list[ScenarioParcelSelection]
-    # --- Hybrid architecture fields (Sprint-3 LLM entegrasyonu) ---
-    rules_passed: Optional[bool] = None
-    rules_warnings: Optional[list[str]] = None
-    llm_explanation: Optional[str] = None
-    what_if: Optional[list[str]] = None
+    rules_passed: bool
+    rules_warnings: list[str]
+    llm_explanation: str
+    what_if: list[str]
 
 
 class ScenarioRecommendResponse(BaseModel):
@@ -466,7 +469,17 @@ def get_decision(parcel_id: str, season: str) -> DecisionResponse:
     return DecisionResponse(**payload)
 
 
-def _map_research_plan(plan: ResearchPlan) -> ScenarioPlanResponse:
+def _map_research_plan(plan: ResearchPlan, final_rank: int, neighbor_info: dict) -> ScenarioPlanResponse:
+    validation = validate_plan(plan)
+    explanation = explain_plan_with_llm(
+        plan_data=plan,
+        risk_reasons=validation.rules_warnings,
+        neighbor_info=neighbor_info,
+    )
+    what_if = generate_what_if_analysis(
+        plan_data=plan,
+        conditions=["su seviyesi düşerse", "daha verimli senaryo gerekirse"],
+    )
     return ScenarioPlanResponse(
         id=plan["id"],
         plan_type=plan["plan_type"],
@@ -477,8 +490,15 @@ def _map_research_plan(plan: ResearchPlan) -> ScenarioPlanResponse:
         balanced_count=plan["balanced_count"],
         risky_count=plan["risky_count"],
         critical_count=plan["critical_count"],
+        optimizer_score=validation.optimizer_score,
+        final_score=validation.final_score,
+        final_rank=final_rank,
         reason_list=plan["reason_list"],
         selections=[ScenarioParcelSelection(**item) for item in plan["selections"]],
+        rules_passed=validation.rules_passed,
+        rules_warnings=validation.rules_warnings,
+        llm_explanation=explanation.summary_tr,
+        what_if=[item.impact_summary for item in what_if],
     )
 
 
@@ -486,12 +506,13 @@ def _map_research_plan(plan: ResearchPlan) -> ScenarioPlanResponse:
 def recommend_scenario(payload: ScenarioRecommendRequest) -> ScenarioRecommendResponse:
     graph = build_graph(payload.village_id)
     plans = recommend_scenarios(payload.village_id)
+    ranked_plans = sorted(plans, key=lambda plan: validate_plan(plan).final_score, reverse=True)
     return ScenarioRecommendResponse(
         village_id=payload.village_id,
         season=payload.season,
         graph_node_count=len(graph["nodes"]),
         graph_edge_count=len(graph["edges"]),
-        plans=[_map_research_plan(plan) for plan in plans],
+        plans=[_map_research_plan(plan, index + 1, graph) for index, plan in enumerate(ranked_plans)],
     )
 
 
@@ -557,32 +578,15 @@ class ScenarioChatResponse(BaseModel):
 
 @app.post("/api/v1/scenario/chat", response_model=ScenarioChatResponse)
 def scenario_chat(payload: ScenarioChatRequest) -> ScenarioChatResponse:
-    """Kullanıcıyla plan hakkında doğal dil diyaloğu.
-
-    LLM entegrasyonu tamamlanana kadar placeholder yanıt döner.
-    """
-    try:
-        result = chat_about_plan(
-            plan_id=payload.plan_id,
-            user_message=payload.user_message,
-            context={
-                "village_id": payload.village_id,
-                "season": payload.season,
-            },
-        )
-        return ScenarioChatResponse(
-            reply=result.reply,
-            suggestions=result.suggestions,
-        )
-    except NotImplementedError:
-        return ScenarioChatResponse(
-            reply=(
-                "LLM entegrasyonu henüz aktif değil. "
-                "Plan detayları için /api/v1/scenario/recommend endpoint'ini kullanabilirsiniz."
-            ),
-            suggestions=[
-                "Bu plan neden önerildi?",
-                "Riski düşürmek için ne yapabilirim?",
-                "Alternatif ürün önerileri neler?",
-            ],
-        )
+    result = chat_about_plan(
+        plan_id=payload.plan_id,
+        user_message=payload.user_message,
+        context={
+            "village_id": payload.village_id,
+            "season": payload.season,
+        },
+    )
+    return ScenarioChatResponse(
+        reply=result.reply,
+        suggestions=result.suggestions,
+    )
