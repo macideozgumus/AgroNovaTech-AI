@@ -14,6 +14,18 @@ from backend.app.models.decision_result import DecisionResult
 from backend.app.repositories.decision_repository import get_decision as repo_get_decision
 from backend.app.repositories.decision_repository import upsert_decision
 from backend.app.services.auth_service import authenticate_user, list_users as auth_list_users, register_user
+from backend.app.services.harvest_service import (
+    create_harvest_plan,
+    delete_harvest_plan,
+    list_harvest_plans,
+    update_harvest_plan,
+)
+from backend.app.services.optimizer_service import (
+    CropKey,
+    ResearchPlan,
+    build_graph,
+)
+from backend.app.services.scenario_service import create_scenario, get_scenario, list_scenarios, recommend_scenarios
 from backend.app.services.village_service import (
     PARCELS,
     PLOTS,
@@ -55,6 +67,10 @@ INCOMPATIBLE_MEDIUM = {
 }
 
 LATENCY_SAMPLES_MS: deque[float] = deque(maxlen=100)
+
+
+def _model_to_dict(model: BaseModel) -> dict:
+    return model.model_dump() if hasattr(model, "model_dump") else model.dict()
 
 
 class LoginRequest(BaseModel):
@@ -136,6 +152,94 @@ class DecisionResponse(BaseModel):
     confidence: Optional[float]
     model_version: str
     decision_source: Literal["rules_only", "hybrid"]
+
+
+class ScenarioRecommendRequest(BaseModel):
+    village_id: str
+    season: str
+
+
+class ScenarioParcelSelection(BaseModel):
+    parcel_id: str
+    crop: CropKey
+    risk_score: int
+    risk_level: Literal["OK", "RISKY", "CRITICAL"]
+    explanation: list[str]
+
+
+class ScenarioPlanResponse(BaseModel):
+    id: str
+    plan_type: Literal["balanced", "low_risk", "yield_balance"]
+    title: str
+    badge: str
+    summary: str
+    emphasis: str
+    balanced_count: int
+    risky_count: int
+    critical_count: int
+    reason_list: list[str]
+    selections: list[ScenarioParcelSelection]
+
+
+class ScenarioRecommendResponse(BaseModel):
+    village_id: str
+    season: str
+    graph_node_count: int
+    graph_edge_count: int
+    plans: list[ScenarioPlanResponse]
+
+
+class ScenarioCreateParcel(BaseModel):
+    parcel_id: str
+    crop: CropKey
+
+
+class ScenarioCreateRequest(BaseModel):
+    name: str
+    village_id: str
+    season: str
+    plan_type: str = "custom"
+    parcels: list[ScenarioCreateParcel]
+
+
+class ScenarioItemResponse(BaseModel):
+    id: str
+    name: str
+    village_id: str
+    season: str
+    created_at: str
+    summary: str
+    plan_type: str
+    balanced_count: int
+    risky_count: int
+    critical_count: int
+    parcels: list[ScenarioParcelSelection]
+
+
+class ScenarioListResponse(BaseModel):
+    scenarios: list[ScenarioItemResponse]
+
+
+class HarvestPlanRequest(BaseModel):
+    title: str
+    parcel_id: str
+    planned_date: str
+    notes: str = ""
+    status: Literal["planned", "active", "done"] = "planned"
+
+
+class HarvestPlanResponse(BaseModel):
+    id: str
+    title: str
+    parcel_id: str
+    planned_date: str
+    notes: str
+    status: Literal["planned", "active", "done"]
+    created_at: str
+
+
+class HarvestPlanListResponse(BaseModel):
+    harvest_plans: list[HarvestPlanResponse]
 
 
 @app.on_event("startup")
@@ -350,3 +454,75 @@ def get_decision(parcel_id: str, season: str) -> DecisionResponse:
     if payload is None:
         raise HTTPException(status_code=404, detail="Decision not found for parcel+season")
     return DecisionResponse(**payload)
+
+
+def _map_research_plan(plan: ResearchPlan) -> ScenarioPlanResponse:
+    return ScenarioPlanResponse(
+        id=plan["id"],
+        plan_type=plan["plan_type"],
+        title=plan["title"],
+        badge=plan["badge"],
+        summary=plan["summary"],
+        emphasis=plan["emphasis"],
+        balanced_count=plan["balanced_count"],
+        risky_count=plan["risky_count"],
+        critical_count=plan["critical_count"],
+        reason_list=plan["reason_list"],
+        selections=[ScenarioParcelSelection(**item) for item in plan["selections"]],
+    )
+
+
+@app.post("/api/v1/scenario/recommend", response_model=ScenarioRecommendResponse)
+def recommend_scenario(payload: ScenarioRecommendRequest) -> ScenarioRecommendResponse:
+    graph = build_graph(payload.village_id)
+    plans = recommend_scenarios(payload.village_id)
+    return ScenarioRecommendResponse(
+        village_id=payload.village_id,
+        season=payload.season,
+        graph_node_count=len(graph["nodes"]),
+        graph_edge_count=len(graph["edges"]),
+        plans=[_map_research_plan(plan) for plan in plans],
+    )
+
+
+@app.post("/api/v1/scenarios", response_model=ScenarioItemResponse)
+def create_scenario_endpoint(payload: ScenarioCreateRequest) -> ScenarioItemResponse:
+    record = create_scenario(
+        name=payload.name,
+        village_id=payload.village_id,
+        season=payload.season,
+        parcels=[_model_to_dict(item) for item in payload.parcels],
+        plan_type=payload.plan_type,
+    )
+    return ScenarioItemResponse(**record)
+
+
+@app.get("/api/v1/scenarios", response_model=ScenarioListResponse)
+def list_scenarios_endpoint(village_id: Optional[str] = None) -> ScenarioListResponse:
+    return ScenarioListResponse(scenarios=[ScenarioItemResponse(**item) for item in list_scenarios(village_id)])
+
+
+@app.get("/api/v1/scenarios/{scenario_id}", response_model=ScenarioItemResponse)
+def get_scenario_endpoint(scenario_id: str) -> ScenarioItemResponse:
+    return ScenarioItemResponse(**get_scenario(scenario_id))
+
+
+@app.post("/api/v1/harvest-plans", response_model=HarvestPlanResponse)
+def create_harvest_plan_endpoint(payload: HarvestPlanRequest) -> HarvestPlanResponse:
+    return HarvestPlanResponse(**create_harvest_plan(**_model_to_dict(payload)))
+
+
+@app.get("/api/v1/harvest-plans", response_model=HarvestPlanListResponse)
+def list_harvest_plans_endpoint() -> HarvestPlanListResponse:
+    return HarvestPlanListResponse(harvest_plans=[HarvestPlanResponse(**item) for item in list_harvest_plans()])
+
+
+@app.put("/api/v1/harvest-plans/{plan_id}", response_model=HarvestPlanResponse)
+def update_harvest_plan_endpoint(plan_id: str, payload: HarvestPlanRequest) -> HarvestPlanResponse:
+    return HarvestPlanResponse(**update_harvest_plan(plan_id, **_model_to_dict(payload)))
+
+
+@app.delete("/api/v1/harvest-plans/{plan_id}")
+def delete_harvest_plan_endpoint(plan_id: str) -> dict[str, str]:
+    delete_harvest_plan(plan_id)
+    return {"status": "deleted"}

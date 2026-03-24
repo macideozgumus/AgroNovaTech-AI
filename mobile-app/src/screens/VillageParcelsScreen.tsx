@@ -18,8 +18,7 @@ import { apiClient } from "../api/client";
 import { clearAuthSession, loadAuthProfile } from "../api/cache";
 import { LeafletParcelMap } from "../components/LeafletParcelMap";
 import { RootStackParamList } from "../navigation/AppNavigator";
-import { getSavedScenarios, type SavedScenario } from "../scenario/store";
-import type { DecisionResponse, ParcelItem, RiskLevel, UserSummary } from "../types/api";
+import type { DecisionResponse, HarvestPlan as ApiHarvestPlan, ParcelItem, RiskLevel, ScenarioItem, UserSummary } from "../types/api";
 import {
   cropVisuals,
   getCropImageSource,
@@ -62,7 +61,7 @@ type ParcelDraft = {
 };
 type VillageGroupKey = "MINE" | "NEIGHBOR";
 type HarvestAlertTone = "urgent" | "soon" | "ready";
-type HarvestPlan = {
+type HarvestPlanView = {
   id: string;
   title: string;
   parcelId: string;
@@ -73,8 +72,8 @@ type HarvestPlan = {
   tone: HarvestAlertTone;
 };
 
-const harvestMonthNames = ["Ocak", "Subat", "Mart", "Nisan", "Mayis", "Haziran", "Temmuz", "Agustos", "Eylul", "Ekim", "Kasim", "Aralik"];
-const harvestWeekDays = ["Pzt", "Sal", "Car", "Per", "Cum", "Cmt", "Paz"];
+const harvestMonthNames = ["Ocak", "Şubat", "Mart", "Nisan", "Mayıs", "Haziran", "Temmuz", "Ağustos", "Eylül", "Ekim", "Kasım", "Aralık"];
+const harvestWeekDays = ["Pzt", "Sal", "Çar", "Per", "Cum", "Cmt", "Paz"];
 
 const toIsoDate = (date: Date) => {
   const year = date.getFullYear();
@@ -99,12 +98,35 @@ const getHarvestRelativeLabel = (value: string) => {
   const diff = Math.round((target.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
 
   if (diff <= 0) {
-    return "Bugun";
+    return "Bugün";
   }
   if (diff === 1) {
-    return "Yarin";
+    return "Yarın";
   }
-  return `${diff} gun sonra`;
+  return `${diff} gün sonra`;
+};
+
+const getHarvestTone = (relativeLabel: string): HarvestAlertTone =>
+  relativeLabel === "Bugün" || relativeLabel === "Yarın"
+    ? "urgent"
+    : relativeLabel.includes("gün")
+      ? "soon"
+      : "ready";
+
+const toHarvestPlanView = (plan: ApiHarvestPlan, parcels: ParcelItem[]): HarvestPlanView => {
+  const parcel = parcels.find((item) => item.parcel_id === plan.parcel_id);
+  const cropKey = (parcel?.planned_crop ?? "wheat") as CropKey;
+  const reminder = getHarvestRelativeLabel(plan.planned_date);
+  return {
+    id: plan.id,
+    title: plan.title,
+    parcelId: plan.parcel_id,
+    cropKey,
+    date: plan.planned_date,
+    note: plan.notes,
+    reminder,
+    tone: getHarvestTone(reminder),
+  };
 };
 
 const DEFAULT_SEASON = "2026_Spring";
@@ -178,7 +200,7 @@ export function VillageParcelsScreen({ navigation }: Props) {
   const [villageMapFit, setVillageMapFit] = useState<"all" | "mine">("all");
   const [scenarioCrop, setScenarioCrop] = useState<CropKey>("corn");
   const [scenarioCards] = useState<Record<string, ScenarioCard[]>>({});
-  const [savedScenarios, setSavedScenarios] = useState<SavedScenario[]>([]);
+  const [savedScenarios, setSavedScenarios] = useState<ScenarioItem[]>([]);
   const [healthDetailOpen, setHealthDetailOpen] = useState(false);
   const [parcelDrafts, setParcelDrafts] = useState<Record<string, ParcelDraft>>({});
   const [parcelDetailOpen, setParcelDetailOpen] = useState(false);
@@ -192,40 +214,9 @@ export function VillageParcelsScreen({ navigation }: Props) {
   const [harvestPlanModalOpen, setHarvestPlanModalOpen] = useState(false);
   const [harvestDraftTitle, setHarvestDraftTitle] = useState("Yeni hasat operasyonu");
   const [harvestDraftDate, setHarvestDraftDate] = useState("2026-03-26");
-  const [harvestDraftNote, setHarvestDraftNote] = useState("Ekip ve makine hazirligini bir gun once tamamla.");
+  const [harvestDraftNote, setHarvestDraftNote] = useState("Ekip ve makine hazırlığını bir gün önce tamamla.");
   const [selectedHarvestDate, setSelectedHarvestDate] = useState("2026-03-24");
-  const [harvestPlans, setHarvestPlans] = useState<HarvestPlan[]>([
-    {
-      id: "harvest-1",
-      title: "Mısır hasadı yaklaşıyor",
-      parcelId: "p3",
-      cropKey: "corn",
-      date: "2026-03-24",
-      note: "Nem takibi ve biçerdöver rezervasyonu bugün netleşmeli.",
-      reminder: "2 gun kaldi",
-      tone: "urgent",
-    },
-    {
-      id: "harvest-2",
-      title: "Ayçiçeği örnekleme kontrolü",
-      parcelId: "p5",
-      cropKey: "sunflower",
-      date: "2026-03-27",
-      note: "Depo alanı ve çuvallama planı hazırlanmalı.",
-      reminder: "5 gun kaldi",
-      tone: "soon",
-    },
-    {
-      id: "harvest-3",
-      title: "Buğday için ekip çıkışı",
-      parcelId: "p1",
-      cropKey: "wheat",
-      date: "2026-03-29",
-      note: "Sabah vardiyası için 4 kişilik ekip hazır olsun.",
-      reminder: "1 hafta icinde",
-      tone: "ready",
-    },
-  ]);
+  const [harvestPlans, setHarvestPlans] = useState<HarvestPlanView[]>([]);
 
   useEffect(() => {
     let mounted = true;
@@ -312,8 +303,31 @@ export function VillageParcelsScreen({ navigation }: Props) {
 
   useFocusEffect(
     useCallback(() => {
-      setSavedScenarios(getSavedScenarios());
-    }, []),
+      let active = true;
+
+      const refreshRemoteData = async () => {
+        try {
+          const [scenarioResponse, harvestResponse] = await Promise.all([
+            apiClient.getScenarios("v1"),
+            apiClient.getHarvestPlans(),
+          ]);
+          if (!active) {
+            return;
+          }
+          setSavedScenarios(scenarioResponse.scenarios);
+          setHarvestPlans(harvestResponse.harvest_plans.map((item) => toHarvestPlanView(item, parcels)));
+        } catch {
+          if (active) {
+            setSavedScenarios([]);
+          }
+        }
+      };
+
+      refreshRemoteData();
+      return () => {
+        active = false;
+      };
+    }, [parcels]),
   );
 
   const decisionLevel = useCallback(
@@ -475,40 +489,43 @@ export function VillageParcelsScreen({ navigation }: Props) {
     navigation.replace("Login");
   };
   const openHarvestComposer = () => {
-    const defaultParcelId = selectedParcel?.parcel_id ?? parcels[0]?.parcel_id ?? "p1";
+    const defaultParcelId = selectedParcel?.parcel_id ?? parcels[0]?.parcel_id ?? "a_p1";
     const defaultCrop = (parcelDrafts[defaultParcelId]?.cropKey ?? parcels.find((item) => item.parcel_id === defaultParcelId)?.planned_crop ?? "wheat") as CropKey;
-    setHarvestDraftTitle(`${cropVisuals[defaultCrop]?.label ?? "Urun"} hasat plani`);
+    setHarvestDraftTitle(`${cropVisuals[defaultCrop]?.label ?? "Ürün"} hasat planı`);
     setHarvestDraftDate(selectedHarvestDate);
-    setHarvestDraftNote("Makine, ekip ve depo hazirligini ayni karttan takip et.");
+    setHarvestDraftNote("Makine, ekip ve depo hazırlığını aynı karttan takip et.");
     setSelectedParcelId(defaultParcelId);
     setHarvestPlanModalOpen(true);
   };
-  const saveHarvestPlan = () => {
+  const saveHarvestPlan = async () => {
     const parcelId = selectedParcel?.parcel_id ?? parcels[0]?.parcel_id;
     if (!parcelId) {
       return;
     }
 
-    const cropKey = (parcelDrafts[parcelId]?.cropKey ?? parcels.find((item) => item.parcel_id === parcelId)?.planned_crop ?? "wheat") as CropKey;
-    const relativeLabel = getHarvestRelativeLabel(harvestDraftDate);
-    const tone: HarvestAlertTone =
-      relativeLabel === "Bugun" || relativeLabel === "Yarin" ? "urgent" : relativeLabel.includes("gun") ? "soon" : "ready";
+    try {
+      const created = await apiClient.createHarvestPlan({
+        title: harvestDraftTitle.trim() || "Hasat planı",
+        parcel_id: parcelId,
+        planned_date: harvestDraftDate,
+        notes: harvestDraftNote.trim() || "Ek not girilmedi.",
+        status: "planned",
+      });
+      setHarvestPlans((current) => [toHarvestPlanView(created, parcels), ...current]);
+      setSelectedHarvestDate(harvestDraftDate);
+      setHarvestPlanModalOpen(false);
+    } catch (error) {
+      setErrorText(error instanceof Error ? error.message : "Hasat planı kaydedilemedi.");
+    }
+  };
 
-    setHarvestPlans((current) => [
-      {
-        id: `harvest-${current.length + 1}`,
-        title: harvestDraftTitle.trim() || "Hasat plani",
-        parcelId,
-        cropKey,
-        date: harvestDraftDate,
-        note: harvestDraftNote.trim() || "Ek not girilmedi.",
-        reminder: relativeLabel,
-        tone,
-      },
-      ...current,
-    ]);
-    setSelectedHarvestDate(harvestDraftDate);
-    setHarvestPlanModalOpen(false);
+  const removeHarvestPlan = async (planId: string) => {
+    try {
+      await apiClient.deleteHarvestPlan(planId);
+      setHarvestPlans((current) => current.filter((item) => item.id !== planId));
+    } catch (error) {
+      setErrorText(error instanceof Error ? error.message : "Hasat planı silinemedi.");
+    }
   };
 
   const renderSavedScenarios = () => (
@@ -535,14 +552,14 @@ export function VillageParcelsScreen({ navigation }: Props) {
             style={styles.savedScenarioCard}
             onPress={() =>
               navigation.navigate("ScenarioBuilder", {
-                focusParcelId: scenario.parcels[0]?.parcelId,
+                focusParcelId: scenario.parcels[0]?.parcel_id,
                 scenarioId: scenario.id,
               })
             }
           >
             <View style={styles.savedScenarioHeader}>
               <Text style={styles.savedScenarioTitle}>{scenario.name}</Text>
-              <Text style={styles.savedScenarioMeta}>{scenario.createdAt}</Text>
+              <Text style={styles.savedScenarioMeta}>{scenario.created_at}</Text>
             </View>
             <Text style={styles.savedScenarioSummary}>{scenario.summary}</Text>
             <Text style={styles.savedScenarioCount}>{scenario.parcels.length} parsel senaryosu</Text>
@@ -581,14 +598,14 @@ export function VillageParcelsScreen({ navigation }: Props) {
             <Text style={styles.avatarGlyph}>🌿</Text>
           </View>
           <View style={styles.welcomeCopy}>
-            <Text style={styles.welcomeTitle}>{authProfile?.username ?? "Hos Geldiniz!"}</Text>
+            <Text style={styles.welcomeTitle}>{authProfile?.username ?? "Hoş Geldiniz!"}</Text>
             <Text style={styles.welcomeLocation}>
               {authProfile ? `${authProfile.province} / ${authProfile.district} / ${authProfile.village}` : "Sakarya / Serdivan / Kazimpasa Koyu"}
             </Text>
           </View>
         </View>
         <Pressable style={styles.notificationButton} onPress={logout}>
-          <Text style={styles.notificationButtonText}>Cikis</Text>
+          <Text style={styles.notificationButtonText}>Çıkış</Text>
         </Pressable>
       </View>
 
@@ -1062,7 +1079,7 @@ export function VillageParcelsScreen({ navigation }: Props) {
 
           <View style={styles.harvestCalendarHeader}>
             <Text style={styles.harvestCalendarMonth}>{calendarMonthLabel}</Text>
-            <Text style={styles.harvestCalendarHint}>Secili takvim donemi</Text>
+            <Text style={styles.harvestCalendarHint}>Seçili takvim dönemi</Text>
           </View>
 
           <View style={styles.harvestCalendarGrid}>
@@ -1104,7 +1121,7 @@ export function VillageParcelsScreen({ navigation }: Props) {
                     selectedHarvestDate === day.iso && styles.harvestPlanCountSelected,
                   ]}
                 >
-                  {day.planCount > 0 ? `${day.planCount} kayit` : "bos"}
+                  {day.planCount > 0 ? `${day.planCount} kayıt` : "boş"}
                 </Text>
               </Pressable>
             ))}
@@ -1114,7 +1131,7 @@ export function VillageParcelsScreen({ navigation }: Props) {
         <View style={styles.sectionCard}>
           <Text style={styles.sectionTitle}>Kayıtlı Hasat Planları</Text>
           <Text style={styles.sectionSubtitle}>
-            {formatHarvestDate(selectedHarvestDate)} tarihine ait kayıtlar aşağıda listelenir.
+                {formatHarvestDate(selectedHarvestDate)} tarihine ait kayıtlar aşağıda listelenir.
           </Text>
 
           {selectedDatePlans.length === 0 ? (
@@ -1137,6 +1154,9 @@ export function VillageParcelsScreen({ navigation }: Props) {
                       {formatHarvestDate(plan.date)} • {getFriendlyParcelName(plan.parcelId)} • {cropVisuals[plan.cropKey].label}
                     </Text>
                   </View>
+                  <Pressable style={styles.harvestDeleteButton} onPress={() => removeHarvestPlan(plan.id)}>
+                    <Text style={styles.harvestDeleteButtonText}>Sil</Text>
+                  </Pressable>
                 </View>
                 <Text style={styles.harvestTimelineNote}>{plan.note}</Text>
               </View>
@@ -2199,6 +2219,15 @@ const styles = StyleSheet.create({
   },
   harvestTimelineImage: { width: 42, height: 42, resizeMode: "contain" },
   harvestTimelineCopy: { flex: 1 },
+  harvestDeleteButton: {
+    minHeight: 36,
+    paddingHorizontal: 14,
+    borderRadius: 999,
+    backgroundColor: "#FDE2DD",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  harvestDeleteButtonText: { color: "#B6463A", fontSize: 12, fontWeight: "900", textTransform: "uppercase" },
   harvestTimelineTitle: { color: "#203021", fontSize: 16, fontWeight: "900" },
   harvestTimelineMeta: { color: "#687867", fontSize: 13, fontWeight: "700", marginTop: 4 },
   harvestTimelineNote: { color: "#556461", fontSize: 14, lineHeight: 21 },

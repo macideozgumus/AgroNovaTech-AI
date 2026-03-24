@@ -5,11 +5,19 @@ import type {
   DecisionResponse,
   FieldLayoutPosition,
   FieldLayoutResponse,
+  HarvestPlan,
+  HarvestPlanListResponse,
+  HarvestPlanRequest,
   LoginRequest,
   LoginResponse,
   NeighborsResponse,
   ParcelListResponse,
   RegisterRequest,
+  ScenarioCreateRequest,
+  ScenarioItem,
+  ScenarioListResponse,
+  ScenarioRecommendRequest,
+  ScenarioRecommendResponse,
   ScoreRequest,
   UsersResponse,
 } from "../types/api";
@@ -131,5 +139,52 @@ export const apiClient = {
     return requestJson<DecisionResponse>(
       `/api/v1/parcels/${parcelId}/decision?season=${encodeURIComponent(season)}`,
     );
+  },
+
+  recommendScenario(payload: ScenarioRecommendRequest) {
+    return requestJson<ScenarioRecommendResponse>("/api/v1/scenario/recommend", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+
+  createScenario(payload: ScenarioCreateRequest) {
+    return requestJson<ScenarioItem>("/api/v1/scenarios", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+
+  getScenarios(villageId?: string) {
+    const suffix = villageId ? `?village_id=${encodeURIComponent(villageId)}` : "";
+    return requestJson<ScenarioListResponse>(`/api/v1/scenarios${suffix}`);
+  },
+
+  getScenario(scenarioId: string) {
+    return requestJson<ScenarioItem>(`/api/v1/scenarios/${scenarioId}`);
+  },
+
+  createHarvestPlan(payload: HarvestPlanRequest) {
+    return requestJson<HarvestPlan>("/api/v1/harvest-plans", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+
+  getHarvestPlans() {
+    return requestJson<HarvestPlanListResponse>("/api/v1/harvest-plans");
+  },
+
+  updateHarvestPlan(planId: string, payload: HarvestPlanRequest) {
+    return requestJson<HarvestPlan>(`/api/v1/harvest-plans/${planId}`, {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    });
+  },
+
+  deleteHarvestPlan(planId: string) {
+    return requestJson<{ status: string }>(`/api/v1/harvest-plans/${planId}`, {
+      method: "DELETE",
+    });
   },
 };

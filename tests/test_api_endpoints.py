@@ -84,3 +84,115 @@ def test_invalid_contract_cases():
 
     bad_neighbors = client.get("/api/v2/parcels/unknown/neighbors", params={"season": "2026_Spring"})
     assert bad_neighbors.status_code == 404
+
+
+def test_scenario_recommendation_and_crud_flow():
+    recommend = client.post("/api/v1/scenario/recommend", json={"village_id": "v1", "season": "2026_Spring"})
+    assert recommend.status_code == 200
+    payload = recommend.json()
+    assert payload["graph_node_count"] == 16
+    assert len(payload["plans"]) == 3
+    assert payload["plans"][0]["selections"]
+
+    create = client.post(
+        "/api/v1/scenarios",
+        json={
+            "name": "Ilkbahar Arastirma",
+            "village_id": "v1",
+            "season": "2026_Spring",
+            "plan_type": "balanced",
+            "parcels": [
+                {"parcel_id": "a_p1", "crop": "wheat"},
+                {"parcel_id": "a_p2", "crop": "barley"},
+            ],
+        },
+    )
+    assert create.status_code == 200
+    created = create.json()
+    assert created["name"] == "Ilkbahar Arastirma"
+    assert created["balanced_count"] >= 0
+
+    list_response = client.get("/api/v1/scenarios", params={"village_id": "v1"})
+    assert list_response.status_code == 200
+    assert any(item["id"] == created["id"] for item in list_response.json()["scenarios"])
+
+    get_response = client.get(f"/api/v1/scenarios/{created['id']}")
+    assert get_response.status_code == 200
+    assert get_response.json()["id"] == created["id"]
+
+
+def test_harvest_plan_crud_flow():
+    create = client.post(
+        "/api/v1/harvest-plans",
+        json={
+            "title": "Bugday Hasadi",
+            "parcel_id": "a_p3",
+            "planned_date": "2026-05-14",
+            "notes": "Sabah ekibi ile basla",
+            "status": "planned",
+        },
+    )
+    assert create.status_code == 200
+    created = create.json()
+    assert created["status"] == "planned"
+
+    list_response = client.get("/api/v1/harvest-plans")
+    assert list_response.status_code == 200
+    assert any(item["id"] == created["id"] for item in list_response.json()["harvest_plans"])
+
+    update = client.put(
+        f"/api/v1/harvest-plans/{created['id']}",
+        json={
+            "title": "Bugday Hasadi Revize",
+            "parcel_id": "a_p3",
+            "planned_date": "2026-05-15",
+            "notes": "Ogleden sonra",
+            "status": "active",
+        },
+    )
+    assert update.status_code == 200
+    assert update.json()["status"] == "active"
+
+    delete = client.delete(f"/api/v1/harvest-plans/{created['id']}")
+    assert delete.status_code == 200
+    assert delete.json()["status"] == "deleted"
+
+
+def test_scenario_harvest_and_ai_edge_cases():
+    bad_recommend = client.post("/api/v1/scenario/recommend", json={"village_id": "unknown", "season": "2026_Spring"})
+    assert bad_recommend.status_code == 404
+
+    bad_scenario = client.post(
+        "/api/v1/scenarios",
+        json={
+            "name": "ab",
+            "village_id": "v1",
+            "season": "2026_Spring",
+            "parcels": [{"parcel_id": "unknown", "crop": "wheat"}],
+        },
+    )
+    assert bad_scenario.status_code in {400, 404}
+
+    bad_harvest = client.post(
+        "/api/v1/harvest-plans",
+        json={
+            "title": "aa",
+            "parcel_id": "unknown",
+            "planned_date": "",
+            "notes": "",
+            "status": "planned",
+        },
+    )
+    assert bad_harvest.status_code in {400, 404}
+
+    bad_harvest_update = client.put(
+        "/api/v1/harvest-plans/unknown",
+        json={
+            "title": "Deneme",
+            "parcel_id": "a_p1",
+            "planned_date": "2026-05-10",
+            "notes": "",
+            "status": "done",
+        },
+    )
+    assert bad_harvest_update.status_code == 404
