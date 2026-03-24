@@ -25,6 +25,7 @@ from backend.app.services.optimizer_service import (
     ResearchPlan,
     build_graph,
 )
+from backend.app.services.llm_service import chat_about_plan
 from backend.app.services.scenario_service import create_scenario, get_scenario, list_scenarios, recommend_scenarios
 from backend.app.services.village_service import (
     PARCELS,
@@ -180,6 +181,11 @@ class ScenarioPlanResponse(BaseModel):
     critical_count: int
     reason_list: list[str]
     selections: list[ScenarioParcelSelection]
+    # --- Hybrid architecture fields (Sprint-3 LLM entegrasyonu) ---
+    rules_passed: Optional[bool] = None
+    rules_warnings: Optional[list[str]] = None
+    llm_explanation: Optional[str] = None
+    what_if: Optional[list[str]] = None
 
 
 class ScenarioRecommendResponse(BaseModel):
@@ -530,3 +536,53 @@ def update_harvest_plan_endpoint(plan_id: str, payload: HarvestPlanRequest) -> H
 def delete_harvest_plan_endpoint(plan_id: str) -> dict[str, str]:
     delete_harvest_plan(plan_id)
     return {"status": "deleted"}
+
+
+# ---------------------------------------------------------------------------
+# Scenario Chat — Doğal dil diyaloğu (LLM explanation layer)
+# ---------------------------------------------------------------------------
+
+
+class ScenarioChatRequest(BaseModel):
+    plan_id: str
+    user_message: str
+    village_id: str
+    season: str
+
+
+class ScenarioChatResponse(BaseModel):
+    reply: str
+    suggestions: list[str]
+
+
+@app.post("/api/v1/scenario/chat", response_model=ScenarioChatResponse)
+def scenario_chat(payload: ScenarioChatRequest) -> ScenarioChatResponse:
+    """Kullanıcıyla plan hakkında doğal dil diyaloğu.
+
+    LLM entegrasyonu tamamlanana kadar placeholder yanıt döner.
+    """
+    try:
+        result = chat_about_plan(
+            plan_id=payload.plan_id,
+            user_message=payload.user_message,
+            context={
+                "village_id": payload.village_id,
+                "season": payload.season,
+            },
+        )
+        return ScenarioChatResponse(
+            reply=result.reply,
+            suggestions=result.suggestions,
+        )
+    except NotImplementedError:
+        return ScenarioChatResponse(
+            reply=(
+                "LLM entegrasyonu henüz aktif değil. "
+                "Plan detayları için /api/v1/scenario/recommend endpoint'ini kullanabilirsiniz."
+            ),
+            suggestions=[
+                "Bu plan neden önerildi?",
+                "Riski düşürmek için ne yapabilirim?",
+                "Alternatif ürün önerileri neler?",
+            ],
+        )

@@ -196,3 +196,48 @@ def test_scenario_harvest_and_ai_edge_cases():
         },
     )
     assert bad_harvest_update.status_code == 404
+
+
+def test_scenario_chat_endpoint():
+    """POST /api/v1/scenario/chat — LLM henüz aktif değilken placeholder yanıt döner."""
+    resp = client.post(
+        "/api/v1/scenario/chat",
+        json={
+            "plan_id": "balanced_v1",
+            "user_message": "Bu planı neden önerdin?",
+            "village_id": "v1",
+            "season": "2026_Spring",
+        },
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert "reply" in body
+    assert isinstance(body["suggestions"], list)
+    assert len(body["suggestions"]) > 0
+
+
+def test_scenario_chat_missing_fields():
+    """Eksik user_message alanı ile 422 validation error beklenir."""
+    resp = client.post(
+        "/api/v1/scenario/chat",
+        json={
+            "plan_id": "balanced_v1",
+            "village_id": "v1",
+            "season": "2026_Spring",
+        },
+    )
+    assert resp.status_code == 422
+
+
+def test_scenario_plan_response_new_fields():
+    """Recommend response'unda yeni opsiyonel alanlar null olarak dönmeli."""
+    resp = client.post("/api/v1/scenario/recommend", json={"village_id": "v1", "season": "2026_Spring"})
+    assert resp.status_code == 200
+    plans = resp.json()["plans"]
+    assert len(plans) > 0
+    first_plan = plans[0]
+    # Yeni alanlar mevcut ve null
+    assert "rules_passed" in first_plan
+    assert "rules_warnings" in first_plan
+    assert "llm_explanation" in first_plan
+    assert "what_if" in first_plan
