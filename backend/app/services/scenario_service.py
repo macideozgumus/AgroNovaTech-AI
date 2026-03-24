@@ -73,7 +73,8 @@ def create_scenario(
         raise HTTPException(status_code=400, detail="Scenario name must be at least 3 characters")
 
     selections = _validate_parcels(parcels)
-    scored = score_plan(village_id, "balanced", selections)
+    strategy = plan_type if plan_type in {"balanced", "low_risk", "yield_balance"} else "balanced"
+    scored = score_plan(village_id, strategy, selections)
     created_at = datetime.now().strftime("%d.%m.%Y %H:%M")
     scenario_id = f"scenario-{len(SCENARIOS) + 1}"
     record: ScenarioRecord = {

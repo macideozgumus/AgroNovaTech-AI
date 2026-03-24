@@ -17,6 +17,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { apiClient } from "../api/client";
 import { clearAuthSession, loadAuthProfile } from "../api/cache";
 import { LeafletParcelMap } from "../components/LeafletParcelMap";
+import { sortReasonCodes } from "../components/reasons";
 import { RootStackParamList } from "../navigation/AppNavigator";
 import type { DecisionResponse, HarvestPlan as ApiHarvestPlan, ParcelItem, RiskLevel, ScenarioItem, UserSummary } from "../types/api";
 import {
@@ -186,6 +187,50 @@ const modeMeta: Record<DashboardMode, { eyebrow: string; title: string }> = {
   GUIDE: { eyebrow: "Destek", title: "Kullanım Kılavuzu" },
   NEIGHBORS: { eyebrow: "Topluluk", title: "Komşu Kullanıcılar" },
 };
+
+const reasonCopyMap: Record<string, { title: string; detail: string }> = {
+  INTER_BLOCK_BORDER_CONFLICT: {
+    title: "Sınır tarla baskısı var",
+    detail: "Komşu blokta uyumsuz ürün etkisi görüldüğü için bu parsel sınır baskısı altında kalıyor.",
+  },
+  INTRA_BLOCK_CONFLICT: {
+    title: "Yakın parseller birbiriyle çakışıyor",
+    detail: "Aynı blok içindeki ürün dağılımı komşu parseller arasında baskı oluşturuyor.",
+  },
+  HIGH_DENSITY_CLUSTERING: {
+    title: "Aynı ürün fazla yoğunlaştı",
+    detail: "Benzer ürünlerin kümelenmesi hastalık, verim ve komşuluk riskini artırıyor.",
+  },
+  VILLAGE_DISTRIBUTION_PRESSURE: {
+    title: "Köy genelinde dağılım dengesiz",
+    detail: "Bu ürün tercihi köy genelindeki dengeyi zorladığı için dikkatli planlama gerekiyor.",
+  },
+};
+
+const riskStatusCopy: Record<RiskLevel | "UNKNOWN", { title: string; detail: string }> = {
+  OK: {
+    title: "Sağlıklı görünüyor",
+    detail: "Bu parselde belirgin bir çakışma görünmüyor. Mevcut ürün ve komşuluk ilişkisi dengeli ilerliyor.",
+  },
+  RISKY: {
+    title: "İzlenmesi gerekiyor",
+    detail: "Bu parselde orta seviyede baskı var. Ürün tercihi ve komşu ilişkisi birlikte gözden geçirilmeli.",
+  },
+  CRITICAL: {
+    title: "Kritik uyarı var",
+    detail: "Bu parselde yüksek risk oluşmuş durumda. Karar vermeden önce alternatif ürün veya komşu etkisi mutlaka kontrol edilmeli.",
+  },
+  UNKNOWN: {
+    title: "Henüz karar üretilmedi",
+    detail: "Bu parsel için güncel risk değerlendirmesi henüz hazır değil.",
+  },
+};
+
+const getReasonExplanation = (code: string) =>
+  reasonCopyMap[code] ?? {
+    title: "Ek kontrol öneriliyor",
+    detail: "Bu parsel için ek bir değerlendirme nedeni oluştu. Senaryo karşılaştırmasıyla kontrol et.",
+  };
 
 export function VillageParcelsScreen({ navigation }: Props) {
   const [parcels, setParcels] = useState<ParcelItem[]>([]);
@@ -413,6 +458,9 @@ export function VillageParcelsScreen({ navigation }: Props) {
   const selectedIsMine = selectedEntry?.isMine ?? false;
   const selectedLevel = selectedParcel ? decisionLevel(selectedParcel.parcel_id) : "UNKNOWN";
   const selectedTone = riskTone(selectedLevel);
+  const selectedDecision = selectedParcel ? decisions[selectedParcel.parcel_id] : undefined;
+  const selectedReasons = sortReasonCodes(selectedDecision?.reason_codes ?? []);
+  const selectedStatusCopy = riskStatusCopy[selectedLevel];
   const selectedCropKey = selectedParcel
     ? parcelDrafts[selectedParcel.parcel_id]?.cropKey ?? (selectedParcel.planned_crop as CropKey)
     : "wheat";
@@ -830,6 +878,32 @@ export function VillageParcelsScreen({ navigation }: Props) {
                     ? "Parsel gözlem istiyor. Karar vermeden önce bir senaryo oluşturmak faydalı olur."
                     : "Parsel dengeli görünüyor. Şimdi detay ya da senaryo karşılaştırmasına geçebilirsin."}
               </Text>
+            </View>
+
+            <View style={styles.reasonPanel}>
+              <Text style={styles.reasonPanelTitle}>Neden Bu Durumda?</Text>
+              <Text style={styles.reasonPanelLead}>{selectedStatusCopy.title}</Text>
+              <Text style={styles.reasonPanelSummary}>{selectedStatusCopy.detail}</Text>
+              {selectedReasons.length > 0 ? (
+                <View style={styles.reasonList}>
+                  {selectedReasons.map((code) => {
+                    const reason = getReasonExplanation(code);
+                    return (
+                      <View key={code} style={styles.reasonItem}>
+                        <View style={[styles.reasonBullet, { backgroundColor: selectedTone.badgeFg }]} />
+                        <View style={styles.reasonCopy}>
+                          <Text style={styles.reasonItemTitle}>{reason.title}</Text>
+                          <Text style={styles.reasonItemDetail}>{reason.detail}</Text>
+                        </View>
+                      </View>
+                    );
+                  })}
+                </View>
+              ) : (
+                <Text style={styles.reasonEmpty}>
+                  Bu parsel için ek risk kodu oluşmadı. Mevcut dağılım ve komşuluk ilişkisi şu an dengeli görünüyor.
+                </Text>
+              )}
             </View>
 
             <View style={styles.primaryActionsRow}>
@@ -1365,6 +1439,34 @@ export function VillageParcelsScreen({ navigation }: Props) {
                           <Text style={styles.neighborArea}>{neighbor.area}</Text>
                         </View>
                       ))}
+                    </View>
+                  </View>
+
+                  <View style={styles.bottomSection}>
+                    <Text style={styles.bottomSectionTitle}>Neden Bu Durumda?</Text>
+                    <View style={styles.detailReasonCard}>
+                      <Text style={styles.reasonPanelLead}>{selectedStatusCopy.title}</Text>
+                      <Text style={styles.reasonPanelSummary}>{selectedStatusCopy.detail}</Text>
+                      {selectedReasons.length > 0 ? (
+                        <View style={styles.reasonList}>
+                          {selectedReasons.map((code) => {
+                            const reason = getReasonExplanation(code);
+                            return (
+                              <View key={`detail-${code}`} style={styles.reasonItem}>
+                                <View style={[styles.reasonBullet, { backgroundColor: selectedTone.badgeFg }]} />
+                                <View style={styles.reasonCopy}>
+                                  <Text style={styles.reasonItemTitle}>{reason.title}</Text>
+                                  <Text style={styles.reasonItemDetail}>{reason.detail}</Text>
+                                </View>
+                              </View>
+                            );
+                          })}
+                        </View>
+                      ) : (
+                        <Text style={styles.reasonEmpty}>
+                          Bu parsel için ek risk kodu oluşmadı. Mevcut plan bu aşamada dengeli görünüyor.
+                        </Text>
+                      )}
                     </View>
                   </View>
                 </ScrollView>
@@ -1915,6 +2017,32 @@ const styles = StyleSheet.create({
   selectionMetricLabel: { color: "#93A0AD", fontSize: 12, fontWeight: "800", textTransform: "uppercase" },
   selectionMetricValue: { color: "#2E6132", fontSize: 18, fontWeight: "900" },
   selectionBodyCard: { borderRadius: 22, backgroundColor: "#F2F5EE", padding: 16, gap: 12 },
+  reasonPanel: {
+    borderRadius: 24,
+    backgroundColor: "#FCFCF8",
+    borderWidth: 1,
+    borderColor: "#E2E7D9",
+    padding: 16,
+    gap: 10,
+  },
+  reasonPanelTitle: { color: "#162234", fontSize: 17, fontWeight: "900" },
+  reasonPanelLead: { color: "#244430", fontSize: 15, fontWeight: "900" },
+  reasonPanelSummary: { color: "#607267", fontSize: 14, lineHeight: 21 },
+  reasonList: { gap: 10, marginTop: 2 },
+  reasonItem: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 10,
+    borderRadius: 18,
+    backgroundColor: "#F3F6ED",
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+  },
+  reasonBullet: { width: 10, height: 10, borderRadius: 999, marginTop: 5 },
+  reasonCopy: { flex: 1, gap: 3 },
+  reasonItemTitle: { color: "#223127", fontSize: 14, fontWeight: "800" },
+  reasonItemDetail: { color: "#67766E", fontSize: 13, lineHeight: 19 },
+  reasonEmpty: { color: "#67766E", fontSize: 13, lineHeight: 20 },
   ownershipMarker: { alignSelf: "flex-start", borderRadius: 999, paddingHorizontal: 14, paddingVertical: 9 },
   ownershipMine: { backgroundColor: "#E5F4E0" },
   ownershipNeighbor: { backgroundColor: "#F4ECE0" },
@@ -2167,6 +2295,14 @@ const styles = StyleSheet.create({
   bottomMediaText: { color: "#5F6D61", fontSize: 14, lineHeight: 20 },
   bottomSection: { gap: 10 },
   bottomSectionTitle: { color: "#162234", fontSize: 18, fontWeight: "900" },
+  detailReasonCard: {
+    borderRadius: 22,
+    backgroundColor: "#F5F7F1",
+    borderWidth: 1,
+    borderColor: "#E1E8D6",
+    padding: 16,
+    gap: 10,
+  },
   harvestHeroCard: { borderRadius: 32, backgroundColor: "#FCFCF9", padding: 20, gap: 18 },
   harvestHeroTop: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", gap: 12 },
   harvestHeroCopy: { flex: 1 },

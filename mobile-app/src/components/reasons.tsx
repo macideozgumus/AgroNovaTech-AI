@@ -12,23 +12,23 @@ const PRIORITY_MAP: Record<string, number> = {
 
 const COPY_MAP: Record<string, { title: string; detail: string; tone: string }> = {
   INTER_BLOCK_BORDER_CONFLICT: {
-    title: "Sinir Tarlasi Catismasi",
-    detail: "Komşu blokta uyumsuz urun etkisi var. Sinir parselleri daha dikkatli planlanmali.",
+    title: "Sınır Tarla Çatışması",
+    detail: "Komşu blokta uyumsuz ürün etkisi var. Sınır parselleri daha dikkatli planlanmalı.",
     tone: colors.critical,
   },
   INTRA_BLOCK_CONFLICT: {
-    title: "Blok Ici Urun Catismasi",
-    detail: "Ayni tarla blogunda komsu parseller birbiriyle uyumsuz bir kombinasyon olusturuyor.",
+    title: "Blok İçi Ürün Çatışması",
+    detail: "Aynı tarla bloğunda komşu parseller birbiriyle uyumsuz bir kombinasyon oluşturuyor.",
     tone: colors.risky,
   },
   HIGH_DENSITY_CLUSTERING: {
-    title: "Yogun Tek Urun Deseni",
-    detail: "Ayni urunun yogunlasmasi risk yayilimini ve verim baskisini artiriyor.",
+    title: "Yoğun Tek Ürün Deseni",
+    detail: "Aynı ürünün yoğunlaşması risk yayılımını ve verim baskısını artırıyor.",
     tone: colors.risky,
   },
   VILLAGE_DISTRIBUTION_PRESSURE: {
-    title: "Koy Geneli Dagilim Baskisi",
-    detail: "Koy genelindeki urun dagilimi dengeli degil. Kolektif planlama gerekli.",
+    title: "Köy Geneli Dağılım Baskısı",
+    detail: "Köy genelindeki ürün dağılımı dengeli değil. Kolektif planlama gerekli.",
     tone: colors.ok,
   },
 };
@@ -40,7 +40,7 @@ export function sortReasonCodes(reasonCodes: string[]) {
 export function ReasonList({ reasonCodes }: { reasonCodes: string[] }) {
   const items = sortReasonCodes(reasonCodes);
   if (items.length === 0) {
-    return <Text style={styles.empty}>Belirgin bir risk nedeni kaydi yok.</Text>;
+    return <Text style={styles.empty}>Belirgin bir risk nedeni kaydı yok.</Text>;
   }
 
   return (
@@ -48,7 +48,7 @@ export function ReasonList({ reasonCodes }: { reasonCodes: string[] }) {
       {items.map((code, index) => {
         const copy = COPY_MAP[code] ?? {
           title: code,
-          detail: "Bu risk kodu icin aciklama tanimlanmadi.",
+          detail: "Bu risk kodu için açıklama tanımlanmadı.",
           tone: colors.unknown,
         };
         return (

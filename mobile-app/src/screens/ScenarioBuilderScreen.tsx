@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Alert, Image, Pressable, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { NativeStackScreenProps } from "@react-navigation/native-stack";
 
@@ -31,15 +31,20 @@ function toScoredMap(items: ScenarioPlanParcel[]) {
   return Object.fromEntries(items.map((item) => [item.parcel_id, item])) as ScoredMap;
 }
 
+function buildEmptySelections(parcels: ParcelItem[]) {
+  return Object.fromEntries(parcels.map((parcel) => [parcel.parcel_id, null])) as SelectionMap;
+}
+
 function fallbackExplanation(parcel: ParcelItem, crop: CropKey | null, decision?: DecisionResponse) {
   if (!crop) {
-    return ["Bu parsel şu an boş.", "Kesin skor için backend planlarından birini uygula veya senaryoyu kaydet."];
+    return ["Bu parsel şu an boş.", "Kullanıcı ürününü kendi belirleyecek; istersen öneri planlarından birini uygula."];
   }
+
   const lines = [`Seçilen ürün: ${cropVisuals[crop].label}.`];
-  lines.push(crop === parcel.planned_crop ? "Mevcut ürün korunuyor." : "Ürün değişti; kesin skor kayıt sırasında backend tarafından hesaplanacak.");
+  lines.push(crop === parcel.planned_crop ? "Mevcut ürün korunuyor." : "Ürün değişti; yeni kombinasyon backend tarafından yeniden değerlendirildi.");
   lines.push(
     decision?.risk_level === "CRITICAL"
-      ? "Taban karar kritik."
+      ? "Taban karar kritik görünüyor."
       : decision?.risk_level === "RISKY"
         ? "Taban karar izleme gerektiriyor."
         : decision?.risk_level === "OK"
@@ -67,6 +72,52 @@ export function ScenarioBuilderScreen({ navigation, route }: Props) {
   const [selections, setSelections] = useState<SelectionMap>({});
   const [scored, setScored] = useState<ScoredMap>({});
 
+  const buildCropOverrides = useCallback(
+    (nextSelections: SelectionMap) =>
+      Object.fromEntries(
+        parcels
+          .filter((parcel) => nextSelections[parcel.parcel_id] !== null)
+          .map((parcel) => [parcel.parcel_id, nextSelections[parcel.parcel_id] as CropKey]),
+      ) as Record<string, CropKey>,
+    [parcels],
+  );
+
+  const recomputeScenario = useCallback(
+    async (nextSelections: SelectionMap) => {
+      const filledParcels = parcels.filter((parcel) => nextSelections[parcel.parcel_id] !== null);
+      if (filledParcels.length === 0) {
+        setScored({});
+        return;
+      }
+
+      const cropOverrides = buildCropOverrides(nextSelections);
+      const resultPairs = await Promise.all(
+        filledParcels.map(async (parcel) => {
+          const decision = await apiClient.scoreDecision({
+            village_id: VILLAGE_ID,
+            season: SEASON,
+            parcel_id: parcel.parcel_id,
+            crop_overrides: cropOverrides,
+          });
+
+          return [
+            parcel.parcel_id,
+            {
+              parcel_id: parcel.parcel_id,
+              crop: nextSelections[parcel.parcel_id] as CropKey,
+              risk_score: decision.risk_score,
+              risk_level: decision.risk_level,
+              explanation: fallbackExplanation(parcel, nextSelections[parcel.parcel_id], decision),
+            },
+          ] as const;
+        }),
+      );
+
+      setScored(Object.fromEntries(resultPairs));
+    },
+    [buildCropOverrides, parcels],
+  );
+
   useEffect(() => {
     let mounted = true;
 
@@ -89,7 +140,9 @@ export function ScenarioBuilderScreen({ navigation, route }: Props) {
         ]);
 
         const myParcels = parcelData.parcels.slice(0, Math.ceil(parcelData.parcels.length / 2));
-        const decisionPairs = await Promise.all(myParcels.map(async (parcel) => [parcel.parcel_id, await loadDecision(parcel.parcel_id)] as const));
+        const decisionPairs = await Promise.all(
+          myParcels.map(async (parcel) => [parcel.parcel_id, await loadDecision(parcel.parcel_id)] as const),
+        );
         const loadedScenario = scenarioId ? await apiClient.getScenario(scenarioId) : undefined;
 
         if (!mounted) {
@@ -103,22 +156,23 @@ export function ScenarioBuilderScreen({ navigation, route }: Props) {
         setGraphInfo({ nodes: recommendData.graph_node_count, edges: recommendData.graph_edge_count });
 
         if (loadedScenario) {
+          const loadedSelections = Object.fromEntries(
+            myParcels.map((parcel) => [
+              parcel.parcel_id,
+              loadedScenario.parcels.find((item) => item.parcel_id === parcel.parcel_id)?.crop ?? null,
+            ]),
+          ) as SelectionMap;
+
           setScenarioName(loadedScenario.name);
-          setSelections(
-            Object.fromEntries(
-              myParcels.map((parcel) => [parcel.parcel_id, loadedScenario.parcels.find((item) => item.parcel_id === parcel.parcel_id)?.crop ?? null]),
-            ),
-          );
+          setSelections(loadedSelections);
           setScored(toScoredMap(loadedScenario.parcels));
           setSelectedPlanId(loadedScenario.plan_type === "custom" ? null : loadedScenario.plan_type);
           setNotice(`"${loadedScenario.name}" backend üzerinden yüklendi.`);
-        } else if (recommendData.plans[0]) {
-          setSelections(toSelectionMap(recommendData.plans[0].selections));
-          setScored(toScoredMap(recommendData.plans[0].selections));
-          setSelectedPlanId(recommendData.plans[0].id);
-          setNotice(`${recommendData.plans[0].title} backend optimizer tarafından hazırlandı.`);
         } else {
-          setSelections(Object.fromEntries(myParcels.map((parcel) => [parcel.parcel_id, null])));
+          setSelections(buildEmptySelections(myParcels));
+          setScored({});
+          setSelectedPlanId(null);
+          setNotice("Parseller boş başlatıldı. Kullanıcı ürünleri kendi belirleyebilir veya öneri planlarından birini uygulayabilir.");
         }
 
         setSelectedParcelId(focusParcelId ?? loadedScenario?.parcels[0]?.parcel_id ?? myParcels[0]?.parcel_id ?? null);
@@ -151,16 +205,21 @@ export function ScenarioBuilderScreen({ navigation, route }: Props) {
     [decisions, parcels, scored, selections],
   );
 
-  const selectedRow = useMemo(() => rows.find((item) => item.parcel.parcel_id === selectedParcelId) ?? rows[0], [rows, selectedParcelId]);
+  const selectedRow = useMemo(
+    () => rows.find((item) => item.parcel.parcel_id === selectedParcelId) ?? rows[0],
+    [rows, selectedParcelId],
+  );
 
   const summary = useMemo(() => {
     if (rows.length === 0) {
       return "Araştırma senaryosu yükleniyor.";
     }
+
     const filled = rows.filter((row) => row.crop !== null);
     if (filled.length === 0) {
-      return "Tüm parseller boş. İstersen backend planlarından birini uygula.";
+      return "Tüm parseller boş. Kullanıcı ürünleri tek tek belirleyebilir veya öneri planlarından başlayabilir.";
     }
+
     const critical = rows.filter((row) => row.riskLevel === "CRITICAL").length;
     const risky = rows.filter((row) => row.riskLevel === "RISKY").length;
     if (critical === 0 && risky <= 1) {
@@ -173,7 +232,8 @@ export function ScenarioBuilderScreen({ navigation, route }: Props) {
   }, [rows]);
 
   const applyPlan = (plan: ScenarioPlan) => {
-    setSelections(toSelectionMap(plan.selections));
+    const nextSelections = toSelectionMap(plan.selections);
+    setSelections(nextSelections);
     setScored(toScoredMap(plan.selections));
     setSelectedPlanId(plan.id);
     setSelectedParcelId(parcels[0]?.parcel_id ?? null);
@@ -181,9 +241,10 @@ export function ScenarioBuilderScreen({ navigation, route }: Props) {
   };
 
   const updateCrop = (parcelId: string, crop: CropKey | null) => {
-    setSelections((current) => ({ ...current, [parcelId]: crop }));
-    setScored((current) => ({ ...current, [parcelId]: undefined }));
+    const nextSelections = { ...selections, [parcelId]: crop };
+    setSelections(nextSelections);
     setSelectedPlanId(null);
+    void recomputeScenario(nextSelections);
   };
 
   const clearScenario = () => {
@@ -193,11 +254,11 @@ export function ScenarioBuilderScreen({ navigation, route }: Props) {
         text: "Temizle",
         style: "destructive",
         onPress: () => {
-          setSelections(Object.fromEntries(parcels.map((parcel) => [parcel.parcel_id, null])));
+          setSelections(buildEmptySelections(parcels));
           setScored({});
           setSelectedPlanId(null);
           setScenarioName("");
-          setNotice("Senaryo temizlendi.");
+          setNotice("Senaryo temizlendi ve parseller boş başlangıç durumuna döndü.");
         },
       },
     ]);
@@ -209,6 +270,7 @@ export function ScenarioBuilderScreen({ navigation, route }: Props) {
       setNotice("Kaydetmeden önce en az bir parsel seçmelisin.");
       return;
     }
+
     try {
       setSaving(true);
       const saved = await apiClient.createScenario({
@@ -243,7 +305,9 @@ export function ScenarioBuilderScreen({ navigation, route }: Props) {
         <View style={styles.card}>
           <Text style={styles.eyebrow}>Araştırma Alanı</Text>
           <Text style={styles.title}>AI Destekli Araştırma Planları</Text>
-          <Text style={styles.body}>Graph modeli {graphInfo.nodes} düğüm ve {graphInfo.edges} komşuluk kenarı üstünde recommendation üretiyor.</Text>
+          <Text style={styles.body}>
+            Graph modeli {graphInfo.nodes} düğüm ve {graphInfo.edges} komşuluk kenarı üstünde recommendation üretiyor.
+          </Text>
         </View>
 
         <View style={styles.card}>
@@ -261,9 +325,13 @@ export function ScenarioBuilderScreen({ navigation, route }: Props) {
                 <Text style={styles.planBadge}>{plan.badge}</Text>
               </View>
               <Text style={styles.emphasis}>{plan.emphasis}</Text>
-              <Text style={styles.metric}>Dengeli {plan.balanced_count} | Riskli {plan.risky_count} | Kritik {plan.critical_count}</Text>
+              <Text style={styles.metric}>
+                Dengeli {plan.balanced_count} | Riskli {plan.risky_count} | Kritik {plan.critical_count}
+              </Text>
               {plan.reason_list.map((item, index) => (
-                <Text key={`${plan.id}-${index}`} style={styles.reason}>• {item}</Text>
+                <Text key={`${plan.id}-${index}`} style={styles.reason}>
+                  • {item}
+                </Text>
               ))}
               <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>
                 {plan.selections.map((selection) => (
@@ -289,7 +357,11 @@ export function ScenarioBuilderScreen({ navigation, route }: Props) {
             placeholder="Örn. İlkbahar deneme senaryosu"
             placeholderTextColor="#8A978A"
           />
-          <Text style={styles.body}>{focusParcelId ? `${getFriendlyParcelName(focusParcelId)} odaklı çalışıyorsun.` : "İstersen plan seç, istersen ürünleri tek tek değiştir."}</Text>
+          <Text style={styles.body}>
+            {focusParcelId
+              ? `${getFriendlyParcelName(focusParcelId)} odaklı çalışıyorsun.`
+              : "Parseller boş başlar; kullanıcı ürünleri tek tek seçebilir."}
+          </Text>
         </View>
 
         <View style={styles.card}>
@@ -303,8 +375,18 @@ export function ScenarioBuilderScreen({ navigation, route }: Props) {
             {rows.map((row) => {
               const tone = riskTone(row.riskLevel);
               return (
-                <Pressable key={row.parcel.parcel_id} style={[styles.panel, selectedParcelId === row.parcel.parcel_id && styles.panelActive]} onPress={() => setSelectedParcelId(row.parcel.parcel_id)}>
-                  {row.crop ? <Image source={getCropImageSource(row.crop)} style={styles.panelIcon} /> : <View style={styles.emptyIcon}><Text style={styles.emptyIconText}>+</Text></View>}
+                <Pressable
+                  key={row.parcel.parcel_id}
+                  style={[styles.panel, selectedParcelId === row.parcel.parcel_id && styles.panelActive]}
+                  onPress={() => setSelectedParcelId(row.parcel.parcel_id)}
+                >
+                  {row.crop ? (
+                    <Image source={getCropImageSource(row.crop)} style={styles.panelIcon} />
+                  ) : (
+                    <View style={styles.emptyIcon}>
+                      <Text style={styles.emptyIconText}>+</Text>
+                    </View>
+                  )}
                   <Text style={styles.planTitle}>{getFriendlyParcelName(row.parcel.parcel_id)}</Text>
                   <Text style={styles.body}>{getFriendlyParcelSubtitle(row.parcel.parcel_id)}</Text>
                   <Text style={[styles.inlineBadge, { color: tone.badgeFg }]}>{tone.text}</Text>
@@ -327,18 +409,27 @@ export function ScenarioBuilderScreen({ navigation, route }: Props) {
               <Text style={styles.metric}>Risk skoru: {selectedRow.score || "-"}</Text>
               <Text style={styles.body}>Mevcut plan: {cropVisuals[selectedRow.parcel.planned_crop]?.label ?? "-"}</Text>
               <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>
-                <Pressable style={[styles.chip, selections[selectedRow.parcel.parcel_id] === null && styles.chipActive]} onPress={() => updateCrop(selectedRow.parcel.parcel_id, null)}>
+                <Pressable
+                  style={[styles.chip, selections[selectedRow.parcel.parcel_id] === null && styles.chipActive]}
+                  onPress={() => updateCrop(selectedRow.parcel.parcel_id, null)}
+                >
                   <Text style={styles.chipText}>Boş Parsel</Text>
                 </Pressable>
                 {cropOptions.map((crop) => (
-                  <Pressable key={`${selectedRow.parcel.parcel_id}-${crop}`} style={[styles.chip, selections[selectedRow.parcel.parcel_id] === crop && styles.chipActive]} onPress={() => updateCrop(selectedRow.parcel.parcel_id, crop)}>
+                  <Pressable
+                    key={`${selectedRow.parcel.parcel_id}-${crop}`}
+                    style={[styles.chip, selections[selectedRow.parcel.parcel_id] === crop && styles.chipActive]}
+                    onPress={() => updateCrop(selectedRow.parcel.parcel_id, crop)}
+                  >
                     <Image source={getCropImageSource(crop)} style={styles.chipIcon} />
                     <Text style={styles.chipText}>{cropVisuals[crop].label}</Text>
                   </Pressable>
                 ))}
               </ScrollView>
               {selectedRow.explanation.map((item, index) => (
-                <Text key={`${selectedRow.parcel.parcel_id}-${index}`} style={styles.reason}>• {item}</Text>
+                <Text key={`${selectedRow.parcel.parcel_id}-${index}`} style={styles.reason}>
+                  • {item}
+                </Text>
               ))}
             </View>
           ) : null}
@@ -360,13 +451,17 @@ export function ScenarioBuilderScreen({ navigation, route }: Props) {
 
         <View style={styles.card}>
           <Text style={styles.titleSmall}>Kaydedilen Senaryolar</Text>
-          {savedScenarios.length === 0 ? <Text style={styles.body}>Henüz kayıt yok.</Text> : savedScenarios.map((scenario) => (
-            <View key={scenario.id} style={styles.savedCard}>
-              <Text style={styles.planTitle}>{scenario.name}</Text>
-              <Text style={styles.body}>{scenario.created_at}</Text>
-              <Text style={styles.body}>{scenario.summary}</Text>
-            </View>
-          ))}
+          {savedScenarios.length === 0 ? (
+            <Text style={styles.body}>Henüz kayıt yok.</Text>
+          ) : (
+            savedScenarios.map((scenario) => (
+              <View key={scenario.id} style={styles.savedCard}>
+                <Text style={styles.planTitle}>{scenario.name}</Text>
+                <Text style={styles.body}>{scenario.created_at}</Text>
+                <Text style={styles.body}>{scenario.summary}</Text>
+              </View>
+            ))
+          )}
         </View>
       </ScrollView>
     </SafeAreaView>
