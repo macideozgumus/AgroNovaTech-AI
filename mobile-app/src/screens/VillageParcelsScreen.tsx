@@ -270,6 +270,9 @@ export function VillageParcelsScreen({ navigation }: Props) {
   const [harvestDraftNote, setHarvestDraftNote] = useState("Ekip ve makine hazırlığını bir gün önce tamamla.");
   const [selectedHarvestDate, setSelectedHarvestDate] = useState("2026-03-24");
   const [harvestPlans, setHarvestPlans] = useState<HarvestPlanView[]>([]);
+  const [subdivideCount, setSubdivideCount] = useState("4");
+  const [subdivideBusy, setSubdivideBusy] = useState(false);
+  const [parcelNameDraft, setParcelNameDraft] = useState("");
 
   const buildCropOverrides = useCallback(
     (drafts: Record<string, ParcelDraft>): Record<string, CropKey> =>
@@ -305,9 +308,7 @@ export function VillageParcelsScreen({ navigation }: Props) {
     [buildCropOverrides, parcels],
   );
 
-  useEffect(() => {
-    let mounted = true;
-
+  const loadParcelData = useCallback(async () => {
     const ensureDecision = async (parcel: ParcelItem) => {
       try {
         return await apiClient.getDecision(parcel.parcel_id, DEFAULT_SEASON);
@@ -323,44 +324,36 @@ export function VillageParcelsScreen({ navigation }: Props) {
       }
     };
 
-    const load = async () => {
-      try {
-        setLoading(true);
-        const data = await apiClient.getParcels("v1");
-        const decisionEntries = await Promise.all(
-          data.parcels.map(async (parcel) => [parcel.parcel_id, await ensureDecision(parcel)] as const),
-        );
-
-        if (mounted) {
-          setParcels(data.parcels);
-          setDecisions(Object.fromEntries(decisionEntries));
-          setSelectedParcelId(data.parcels[0]?.parcel_id ?? null);
-          setParcelDrafts(
-            Object.fromEntries(
-              data.parcels.map((parcel) => [
-                parcel.parcel_id,
-                { cropKey: parcel.planned_crop as CropKey, neighborEnabled: true },
-              ]),
-            ),
-          );
-          setErrorText(null);
-        }
-      } catch (error) {
-        if (mounted) {
-          setErrorText(error instanceof Error ? error.message : "Parseller yüklenemedi.");
-        }
-      } finally {
-        if (mounted) {
-          setLoading(false);
-        }
-      }
-    };
-
-    load();
-    return () => {
-      mounted = false;
-    };
+    setLoading(true);
+    try {
+      const data = await apiClient.getParcels("v1");
+      const decisionEntries = await Promise.all(
+        data.parcels.map(async (parcel) => [parcel.parcel_id, await ensureDecision(parcel)] as const),
+      );
+      setParcels(data.parcels);
+      setDecisions(Object.fromEntries(decisionEntries));
+      setSelectedParcelId((current) =>
+        data.parcels.some((parcel) => parcel.parcel_id === current) ? current ?? null : data.parcels[0]?.parcel_id ?? null,
+      );
+      setParcelDrafts(
+        Object.fromEntries(
+          data.parcels.map((parcel) => [
+            parcel.parcel_id,
+            { cropKey: parcel.planned_crop as CropKey, neighborEnabled: true },
+          ]),
+        ),
+      );
+      setErrorText(null);
+    } catch (error) {
+      setErrorText(error instanceof Error ? error.message : "Parseller yüklenemedi.");
+    } finally {
+      setLoading(false);
+    }
   }, []);
+
+  useEffect(() => {
+    void loadParcelData();
+  }, [loadParcelData]);
 
   useEffect(() => {
     let mounted = true;
@@ -426,14 +419,13 @@ export function VillageParcelsScreen({ navigation }: Props) {
     [decisions],
   );
 
-  const parcelsWithOwnership = useMemo(
-    () =>
-      parcels.map((parcel, index) => ({
-        parcel,
-        isMine: index < Math.ceil(parcels.length / 2),
-      })),
-    [parcels],
-  );
+  const parcelsWithOwnership = useMemo(() => {
+    const currentUser = authProfile?.username ?? "demo";
+    return parcels.map((parcel) => ({
+      parcel,
+      isMine: parcel.owner_user_id ? parcel.owner_user_id === currentUser : parcel.field_block === "A",
+    }));
+  }, [authProfile?.username, parcels]);
 
   const filteredParcels = useMemo(() => {
     const normalized = query.trim().toLowerCase();
@@ -445,8 +437,8 @@ export function VillageParcelsScreen({ navigation }: Props) {
       const cropLabel = (cropVisuals[parcel.planned_crop]?.label ?? parcel.planned_crop).toLowerCase();
       const textMatch =
         normalized.length === 0 ||
-        getFriendlyParcelName(parcel.parcel_id).toLowerCase().includes(normalized) ||
-        getFriendlyParcelSubtitle(parcel.parcel_id).toLowerCase().includes(normalized) ||
+        getFriendlyParcelName(parcel.parcel_id, parcel.display_name).toLowerCase().includes(normalized) ||
+        getFriendlyParcelSubtitle(parcel.parcel_id, parcel.display_name).toLowerCase().includes(normalized) ||
         cropLabel.includes(normalized);
       return ownershipMatch && textMatch;
     });
@@ -467,6 +459,10 @@ export function VillageParcelsScreen({ navigation }: Props) {
       setSelectedParcelId(selectedEntry.parcel.parcel_id);
     }
   }, [selectedEntry, selectedParcelId]);
+
+  useEffect(() => {
+    setParcelNameDraft(selectedEntry?.parcel.display_name ?? "");
+  }, [selectedEntry?.parcel.display_name, selectedEntry?.parcel.parcel_id]);
 
   const selectedParcel = selectedEntry?.parcel ?? null;
   const selectedIsMine = selectedEntry?.isMine ?? false;
@@ -610,6 +606,108 @@ export function VillageParcelsScreen({ navigation }: Props) {
       setHarvestPlanModalOpen(false);
     } catch (error) {
       setErrorText(error instanceof Error ? error.message : "Hasat planı kaydedilemedi.");
+    }
+  };
+
+  const subdivideSelectedParcel = async () => {
+    if (!selectedParcel) {
+      return;
+    }
+    const requestedCount = Number.parseInt(subdivideCount, 10);
+    if (!Number.isFinite(requestedCount) || requestedCount < 2) {
+      setErrorText("Parsel sayisi en az 2 olmali.");
+      return;
+    }
+
+    try {
+      setSubdivideBusy(true);
+      const response = await apiClient.subdivideParcel(selectedParcel.parcel_id, {
+        requested_count: requestedCount,
+        split_strategy: "equal_grid",
+      });
+      await loadParcelData();
+      setSelectedParcelId(response.subparcels[0]?.parcel_id ?? selectedParcel.parcel_id);
+      setParcelDetailOpen(true);
+    } catch (error) {
+      setErrorText(error instanceof Error ? error.message : "Parsel bolunemedi.");
+    } finally {
+      setSubdivideBusy(false);
+    }
+  };
+
+  const subdivideWholeField = async () => {
+    if (!selectedParcel) {
+      return;
+    }
+    const requestedCount = Number.parseInt(subdivideCount, 10);
+    if (!Number.isFinite(requestedCount) || requestedCount < 2) {
+      setErrorText("Parsel sayisi en az 2 olmali.");
+      return;
+    }
+
+    try {
+      setSubdivideBusy(true);
+      const response = await apiClient.subdivideField(selectedParcel.field_block, {
+        requested_count: requestedCount,
+        split_strategy: "equal_grid",
+      });
+      await loadParcelData();
+      setSelectedParcelId(response.parcels[0]?.parcel_id ?? null);
+      setParcelDetailOpen(true);
+    } catch (error) {
+      setErrorText(error instanceof Error ? error.message : "Tarla geneli bolunemedi.");
+    } finally {
+      setSubdivideBusy(false);
+    }
+  };
+
+  const undoSelectedSplit = async () => {
+    if (!selectedParcel) {
+      return;
+    }
+    try {
+      setSubdivideBusy(true);
+      await apiClient.undoParcelSplit(selectedParcel.parcel_id);
+      await loadParcelData();
+    } catch (error) {
+      setErrorText(error instanceof Error ? error.message : "Geri alma islemi basarisiz.");
+    } finally {
+      setSubdivideBusy(false);
+    }
+  };
+
+  const deleteSelectedParcelArea = async () => {
+    if (!selectedParcel) {
+      return;
+    }
+    try {
+      setSubdivideBusy(true);
+      await apiClient.deleteParcel(selectedParcel.parcel_id);
+      await loadParcelData();
+    } catch (error) {
+      setErrorText(error instanceof Error ? error.message : "Parsel silinemedi.");
+    } finally {
+      setSubdivideBusy(false);
+    }
+  };
+
+  const renameSelectedParcel = async () => {
+    if (!selectedParcel) {
+      return;
+    }
+    const nextName = parcelNameDraft.trim();
+    if (nextName.length < 2) {
+      setErrorText("Parsel adi en az 2 karakter olmali.");
+      return;
+    }
+    try {
+      setSubdivideBusy(true);
+      await apiClient.updateParcelName(selectedParcel.parcel_id, { display_name: nextName });
+      await loadParcelData();
+    } catch (error) {
+      setErrorText(error instanceof Error ? error.message : "Parsel adi guncellenemedi.");
+    } finally {
+      setSubdivideBusy(false);
     }
   };
 
@@ -856,9 +954,9 @@ export function VillageParcelsScreen({ navigation }: Props) {
                   />
                 </View>
                 <View style={styles.selectionCopy}>
-                  <Text style={styles.selectionTitle}>{getFriendlyParcelName(selectedParcel.parcel_id)}</Text>
+                  <Text style={styles.selectionTitle}>{getFriendlyParcelName(selectedParcel.parcel_id, selectedParcel.display_name)}</Text>
                   <Text style={styles.selectionSubtitle}>
-                    {selectedVisual.label} Tarlası • {getParcelArea(selectedParcel.parcel_id)}
+                    {selectedVisual.label} Tarlası • {Math.round(selectedParcel.area_m2 ?? 0)} m²
                   </Text>
                 </View>
               </View>
@@ -869,16 +967,16 @@ export function VillageParcelsScreen({ navigation }: Props) {
 
             <View style={styles.selectionStatsRow}>
               <View style={styles.selectionMetricCard}>
-                <Text style={styles.selectionMetricLabel}>Nem</Text>
-                <Text style={styles.selectionMetricValue}>%{Math.max(48, moisture - 3)}</Text>
+                <Text style={styles.selectionMetricLabel}>Alan</Text>
+                <Text style={styles.selectionMetricValue}>{Math.round(selectedParcel.area_m2 ?? 0)}</Text>
               </View>
               <View style={styles.selectionMetricCard}>
-                <Text style={styles.selectionMetricLabel}>Sıcaklık</Text>
-                <Text style={styles.selectionMetricValue}>24°C</Text>
+                <Text style={styles.selectionMetricLabel}>Alt Parsel</Text>
+                <Text style={styles.selectionMetricValue}>{selectedParcel.is_subparcel ? "Evet" : "Hayır"}</Text>
               </View>
               <View style={styles.selectionMetricCard}>
-                <Text style={styles.selectionMetricLabel}>Hasat</Text>
-                <Text style={styles.selectionMetricValue}>{10 + summary.mine} G.</Text>
+                <Text style={styles.selectionMetricLabel}>Sahip</Text>
+                <Text style={styles.selectionMetricValue}>{selectedIsMine ? "Ben" : "Komşu"}</Text>
               </View>
             </View>
 
@@ -921,6 +1019,77 @@ export function VillageParcelsScreen({ navigation }: Props) {
                   Bu parsel için ek risk kodu oluşmadı. Mevcut dağılım ve komşuluk ilişkisi şu an dengeli görünüyor.
                 </Text>
               )}
+            </View>
+
+            <View style={styles.subdivideCard}>
+              <Text style={styles.subdivideTitle}>Bolme Islemleri</Text>
+              <Text style={styles.subdivideText}>
+                Once tarla genelini bol, sonra istersen secili alanin kendi icinde tekrar parcala. Geri alma ve silme ayni panelden yapilir.
+              </Text>
+              <View style={styles.renameRow}>
+                <TextInput
+                  value={parcelNameDraft}
+                  onChangeText={setParcelNameDraft}
+                  style={styles.renameInput}
+                  placeholder="Parsel adi"
+                  placeholderTextColor="#7E887D"
+                />
+                <Pressable
+                  style={[styles.secondaryButtonCompact, styles.subdivideActionButton, subdivideBusy && { opacity: 0.6 }]}
+                  onPress={renameSelectedParcel}
+                  disabled={subdivideBusy}
+                >
+                  <Text style={styles.secondaryButtonCompactText}>Adi Kaydet</Text>
+                </Pressable>
+              </View>
+              <View style={styles.subdivideRow}>
+                <TextInput
+                  value={subdivideCount}
+                  onChangeText={setSubdivideCount}
+                  keyboardType="number-pad"
+                  style={styles.subdivideInput}
+                  placeholder="4"
+                  placeholderTextColor="#7E887D"
+                />
+                <Pressable
+                  style={[styles.secondaryButtonCompact, styles.subdivideActionButton, subdivideBusy && { opacity: 0.6 }]}
+                  onPress={subdivideWholeField}
+                  disabled={subdivideBusy}
+                >
+                  <Text style={styles.secondaryButtonCompactText}>
+                    {subdivideBusy ? "Isleniyor..." : "Tum Tarlayi Bol"}
+                  </Text>
+                </Pressable>
+              </View>
+              <View style={styles.subdivideRow}>
+                <Pressable
+                  style={[styles.secondaryButtonCompact, styles.subdivideActionButton, subdivideBusy && { opacity: 0.6 }]}
+                  onPress={subdivideSelectedParcel}
+                  disabled={subdivideBusy}
+                >
+                  <Text style={styles.secondaryButtonCompactText}>
+                    {subdivideBusy ? "Isleniyor..." : "Seciliyi Yeniden Bol"}
+                  </Text>
+                </Pressable>
+                <Pressable
+                  style={[styles.secondaryButtonCompact, styles.subdivideSmallButton, subdivideBusy && { opacity: 0.6 }]}
+                  onPress={undoSelectedSplit}
+                  disabled={subdivideBusy}
+                >
+                  <Text style={styles.secondaryButtonCompactText}>
+                    {subdivideBusy ? "Isleniyor..." : "Geri Al"}
+                  </Text>
+                </Pressable>
+                <Pressable
+                  style={[styles.secondaryButtonCompact, styles.subdivideSmallButton, subdivideBusy && { opacity: 0.6 }]}
+                  onPress={deleteSelectedParcelArea}
+                  disabled={subdivideBusy}
+                >
+                  <Text style={styles.secondaryButtonCompactText}>
+                    {subdivideBusy ? "Isleniyor..." : "Sil"}
+                  </Text>
+                </Pressable>
+              </View>
             </View>
 
             <View style={styles.primaryActionsRow}>
@@ -1006,19 +1175,7 @@ export function VillageParcelsScreen({ navigation }: Props) {
               cropKey: parcelDrafts[item.parcel.parcel_id]?.cropKey ?? (item.parcel.planned_crop as CropKey),
             }))}
             selectedParcelId={selectedParcel?.parcel_id}
-            onParcelPress={(id) => {
-              if (id === "__group_mine__") {
-                openVillageGroupSheet("MINE");
-                return;
-              }
-
-              if (id === "__group_neighbor__") {
-                openVillageGroupSheet("NEIGHBOR");
-                return;
-              }
-
-              openParcelDetail(id);
-            }}
+            onParcelPress={(id) => openParcelDetail(id)}
             showVillageBoundary
             preferredFit={villageMapFit}
           />
@@ -1055,9 +1212,9 @@ export function VillageParcelsScreen({ navigation }: Props) {
                 <View style={styles.villageParcelLead}>
                   <Image source={getCropImageSource(item.parcel.planned_crop as CropKey)} style={styles.villageParcelIcon} />
                   <View>
-                    <Text style={styles.villageParcelTitle}>{getFriendlyParcelName(item.parcel.parcel_id)}</Text>
+                    <Text style={styles.villageParcelTitle}>{getFriendlyParcelName(item.parcel.parcel_id, item.parcel.display_name)}</Text>
                     <Text style={styles.villageParcelSubtitle}>
-                      {item.isMine ? "Benim tarlam" : "Köy parseli"} • {getFriendlyParcelSubtitle(item.parcel.parcel_id)}
+                      {item.isMine ? "Benim tarlam" : "Köy parseli"} • {getFriendlyParcelSubtitle(item.parcel.parcel_id, item.parcel.display_name)}
                     </Text>
                   </View>
                 </View>
@@ -1361,9 +1518,9 @@ export function VillageParcelsScreen({ navigation }: Props) {
                 <View style={styles.bottomSheetHeader}>
                   <View style={styles.bottomSheetHeaderCopy}>
                     <Text style={styles.detailEyebrow}>Parsel Seçimi</Text>
-                    <Text style={styles.bottomSheetTitle}>{getFriendlyParcelName(selectedParcel.parcel_id)}</Text>
+                    <Text style={styles.bottomSheetTitle}>{getFriendlyParcelName(selectedParcel.parcel_id, selectedParcel.display_name)}</Text>
                     <Text style={styles.bottomSheetSubtitle}>
-                      {getFriendlyParcelSubtitle(selectedParcel.parcel_id)} • {getParcelArea(selectedParcel.parcel_id)}
+                      {getFriendlyParcelSubtitle(selectedParcel.parcel_id, selectedParcel.display_name)} • {getParcelArea(selectedParcel.parcel_id)}
                     </Text>
                   </View>
                   <View style={[styles.riskBadge, { backgroundColor: selectedTone.badgeBg }]}>
@@ -1553,7 +1710,7 @@ export function VillageParcelsScreen({ navigation }: Props) {
                           selectedParcel?.parcel_id === parcel.parcel_id && styles.harvestParcelChipTextActive,
                         ]}
                       >
-                        {getFriendlyParcelName(parcel.parcel_id)}
+                        {getFriendlyParcelName(parcel.parcel_id, parcel.display_name)}
                       </Text>
                     </Pressable>
                   ))}
@@ -1624,9 +1781,9 @@ export function VillageParcelsScreen({ navigation }: Props) {
                         <View style={styles.villageParcelLead}>
                           <Image source={getCropImageSource(draftCrop)} style={styles.villageParcelIcon} />
                           <View>
-                            <Text style={styles.villageParcelTitle}>{getFriendlyParcelName(item.parcel.parcel_id)}</Text>
+                            <Text style={styles.villageParcelTitle}>{getFriendlyParcelName(item.parcel.parcel_id, item.parcel.display_name)}</Text>
                             <Text style={styles.villageParcelSubtitle}>
-                              {getFriendlyParcelSubtitle(item.parcel.parcel_id)} • {getParcelArea(item.parcel.parcel_id)}
+                              {getFriendlyParcelSubtitle(item.parcel.parcel_id, item.parcel.display_name)} • {getParcelArea(item.parcel.parcel_id)}
                             </Text>
                           </View>
                         </View>
@@ -2044,6 +2201,53 @@ const styles = StyleSheet.create({
   selectionMetricCard: { flex: 1, borderRadius: 22, backgroundColor: "#F7F8F4", paddingHorizontal: 14, paddingVertical: 16, gap: 6 },
   selectionMetricLabel: { color: "#93A0AD", fontSize: 12, fontWeight: "800", textTransform: "uppercase" },
   selectionMetricValue: { color: "#2E6132", fontSize: 18, fontWeight: "900" },
+  subdivideCard: {
+    marginTop: 16,
+    backgroundColor: "#F7F4EA",
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: "#E1D8C2",
+    padding: 16,
+  },
+  subdivideTitle: { color: "#223127", fontSize: 15, fontWeight: "900" },
+  subdivideText: { color: "#6F7C72", fontSize: 13, lineHeight: 19, marginTop: 6 },
+  renameRow: { flexDirection: "row", alignItems: "center", gap: 10, marginTop: 12 },
+  subdivideRow: { flexDirection: "row", alignItems: "stretch", flexWrap: "wrap", gap: 10, marginTop: 12 },
+  renameInput: {
+    flex: 1,
+    minWidth: 150,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: "#D4C9AF",
+    backgroundColor: "#FFFDF8",
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    color: "#223127",
+    fontSize: 15,
+    fontWeight: "700",
+  },
+  subdivideInput: {
+    width: 72,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: "#D4C9AF",
+    backgroundColor: "#FFFDF8",
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    color: "#223127",
+    fontSize: 16,
+    fontWeight: "800",
+  },
+  subdivideActionButton: {
+    flexGrow: 1,
+    flexShrink: 1,
+    minWidth: 0,
+  },
+  subdivideSmallButton: {
+    flexGrow: 1,
+    flexBasis: "30%",
+    minWidth: 96,
+  },
   selectionBodyCard: { borderRadius: 22, backgroundColor: "#F2F5EE", padding: 16, gap: 12 },
   reasonPanel: {
     borderRadius: 24,
@@ -2085,15 +2289,18 @@ const styles = StyleSheet.create({
   secondaryButtonText: { color: "#7B6246", fontSize: 15, fontWeight: "900" },
   secondaryButtonCompact: {
     minHeight: 42,
-    paddingHorizontal: 14,
-    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 18,
     backgroundColor: "#EFE5D7",
     alignItems: "center",
     justifyContent: "center",
+    alignSelf: "flex-start",
+    maxWidth: "100%",
   },
-  secondaryButtonCompactText: { color: "#7B6246", fontSize: 12, fontWeight: "900", textTransform: "uppercase" },
+  secondaryButtonCompactText: { color: "#7B6246", fontSize: 11, fontWeight: "900", textTransform: "uppercase", textAlign: "center" },
   sectionCard: { backgroundColor: "#FCFCF9", borderRadius: 30, padding: 20, gap: 16 },
-  sectionHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: 12 },
+  sectionHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" },
   sectionTitle: { color: "#162234", fontSize: 22, fontWeight: "900" },
   sectionSubtitle: { color: "#6B7A67", fontSize: 14, lineHeight: 20 },
   cropPickerRow: { gap: 12 },

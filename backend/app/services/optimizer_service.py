@@ -5,7 +5,15 @@ from dataclasses import dataclass
 from typing import Literal, Optional, TypedDict
 
 from backend.app.decision_engine import compute_rules_score
-from backend.app.services.village_service import PARCELS, PLOTS, get_layout, get_neighbor_ids, list_parcels
+from backend.app.services.village_service import (
+    get_all_parcel_ids,
+    get_crop_map,
+    get_layout,
+    get_neighbor_details,
+    get_neighbor_ids,
+    get_parcel_crop,
+    list_parcels,
+)
 
 CropKey = Literal["corn", "sunflower", "wheat", "barley"]
 PlanType = Literal["balanced", "low_risk", "yield_balance"]
@@ -156,33 +164,37 @@ def build_graph(village_id: str) -> GraphModel:
     seen: set[tuple[str, str, str]] = set()
     edges: list[GraphEdge] = []
 
-    for parcel_id in PARCELS:
-        intra_ids, inter_ids = get_neighbor_ids(parcel_id)
-        for neighbor_id in intra_ids:
-            edge = tuple(sorted((parcel_id, neighbor_id)) + ["INTRA_BLOCK"])
+    for parcel_id in get_all_parcel_ids():
+        for detail in get_neighbor_details(parcel_id):
+            neighbor_id = detail["parcel_id"]
+            adjacency_type = detail["adjacency_type"]
+            edge = tuple(sorted((parcel_id, neighbor_id)) + [adjacency_type])
             if edge not in seen:
                 seen.add(edge)
-                edges.append({"source": edge[0], "target": edge[1], "adjacency_type": "INTRA_BLOCK", "weight": 1.0})
-        for neighbor_id in inter_ids:
-            edge = tuple(sorted((parcel_id, neighbor_id)) + ["INTER_BLOCK"])
-            if edge not in seen:
-                seen.add(edge)
-                edges.append({"source": edge[0], "target": edge[1], "adjacency_type": "INTER_BLOCK", "weight": 1.35})
+                edges.append(
+                    {
+                        "source": edge[0],
+                        "target": edge[1],
+                        "adjacency_type": adjacency_type,
+                        "weight": max(1.0, detail["shared_boundary_ratio"] * (1.35 if adjacency_type == "INTER_BLOCK" else 1.0)),
+                    }
+                )
 
     return {"village_id": village_id, "layout_position": get_layout(), "nodes": nodes, "edges": edges}
 
 
 def _evaluate_candidate(parcel_id: str, candidate_crop: CropKey, strategy: PlanType, selections: dict[str, CropKey]) -> ParcelCandidate:
     weights = PLAN_WEIGHTS[strategy]
-    current_crop = PLOTS[parcel_id]
+    current_crop = get_parcel_crop(parcel_id)
     intra_ids, inter_ids = get_neighbor_ids(parcel_id)
+    crop_map = get_crop_map(active_only=True)
 
     intra_high = intra_medium = intra_same = 0
     inter_high = inter_medium = inter_same = 0
     neighbor_penalty = 0
 
     for neighbor_id in intra_ids:
-        neighbor_crop = selections.get(neighbor_id, PLOTS[neighbor_id])
+        neighbor_crop = selections.get(neighbor_id, crop_map[neighbor_id])
         pair_penalty = _pair_penalty(candidate_crop, neighbor_crop)
         neighbor_penalty += pair_penalty
         if candidate_crop == neighbor_crop:
@@ -193,7 +205,7 @@ def _evaluate_candidate(parcel_id: str, candidate_crop: CropKey, strategy: PlanT
             intra_medium += 1
 
     for neighbor_id in inter_ids:
-        neighbor_crop = selections.get(neighbor_id, PLOTS[neighbor_id])
+        neighbor_crop = selections.get(neighbor_id, crop_map[neighbor_id])
         pair_penalty = int(_pair_penalty(candidate_crop, neighbor_crop) * 1.15)
         neighbor_penalty += pair_penalty
         if candidate_crop == neighbor_crop:
@@ -203,11 +215,11 @@ def _evaluate_candidate(parcel_id: str, candidate_crop: CropKey, strategy: PlanT
         elif (candidate_crop, neighbor_crop) in INCOMPATIBLE_MEDIUM:
             inter_medium += 1
 
-    projected_counts = Counter(PLOTS.values())
+    projected_counts = Counter(crop_map.values())
     projected_counts.update(selections.values())
     projected_counts[candidate_crop] += 1
     village_crop_diversity = len([crop for crop, count in projected_counts.items() if count > 0])
-    same_crop_ratio = projected_counts[candidate_crop] / max(len(PLOTS), 1)
+    same_crop_ratio = projected_counts[candidate_crop] / max(len(crop_map), 1)
 
     base_risk_score, _ = compute_rules_score(
         intra_high=intra_high,
@@ -251,12 +263,14 @@ def _evaluate_candidate(parcel_id: str, candidate_crop: CropKey, strategy: PlanT
 def score_plan(village_id: str, strategy: PlanType, base_selections: Optional[dict[str, CropKey]] = None) -> ResearchPlan:
     build_graph(village_id)
     selections: dict[str, CropKey] = {}
+    active_parcel_ids = get_all_parcel_ids()
+    crop_map = get_crop_map(active_only=True)
     if base_selections:
         for parcel_id, crop in base_selections.items():
-            if parcel_id in PARCELS:
+            if parcel_id in active_parcel_ids:
                 selections[parcel_id] = crop
-        for parcel_id in PARCELS:
-            selections.setdefault(parcel_id, PLOTS[parcel_id])
+        for parcel_id in active_parcel_ids:
+            selections.setdefault(parcel_id, crop_map[parcel_id])
 
     ordered_parcels = list_parcels(village_id)
     if not base_selections:

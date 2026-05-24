@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from statistics import mean
 
 from backend.app.services.optimizer_service import CropKey, ResearchPlan
-from backend.app.services.village_service import PARCELS, PLOTS, get_neighbor_ids
+from backend.app.services.village_service import get_all_parcel_ids, get_crop_map, get_neighbor_ids
 
 INCOMPATIBLE_HIGH = {("corn", "sunflower"), ("sunflower", "corn")}
 INCOMPATIBLE_MEDIUM = {
@@ -41,20 +41,22 @@ def _pair_kind(a: CropKey, b: CropKey) -> str:
 
 
 def build_selection_map(plan: ResearchPlan) -> dict[str, CropKey]:
+    crop_map = get_crop_map(active_only=True)
     selections = {item["parcel_id"]: item["crop"] for item in plan["selections"]}
-    for parcel_id in PARCELS:
-        selections.setdefault(parcel_id, PLOTS[parcel_id])  # defensive fallback
+    for parcel_id in get_all_parcel_ids():
+        selections.setdefault(parcel_id, crop_map[parcel_id])  # defensive fallback
     return selections
 
 
 def validate_parcel_selection(parcel_id: str, crop: CropKey, selections: dict[str, CropKey]) -> list[str]:
+    crop_map = get_crop_map(active_only=True)
     warnings: set[str] = set()
     intra_ids, inter_ids = get_neighbor_ids(parcel_id)
     intra_high = inter_high = total_high = 0
     same_neighbors = 0
 
     for neighbor_id in intra_ids:
-        pair = _pair_kind(crop, selections.get(neighbor_id, PLOTS[neighbor_id]))
+        pair = _pair_kind(crop, selections.get(neighbor_id, crop_map[neighbor_id]))
         if pair == "high":
             intra_high += 1
             total_high += 1
@@ -62,7 +64,7 @@ def validate_parcel_selection(parcel_id: str, crop: CropKey, selections: dict[st
             same_neighbors += 1
 
     for neighbor_id in inter_ids:
-        pair = _pair_kind(crop, selections.get(neighbor_id, PLOTS[neighbor_id]))
+        pair = _pair_kind(crop, selections.get(neighbor_id, crop_map[neighbor_id]))
         if pair == "high":
             inter_high += 1
             total_high += 1

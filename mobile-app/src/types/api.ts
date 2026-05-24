@@ -46,6 +46,15 @@ export interface ParcelItem {
   parcel_id: string;
   field_block: "A" | "B";
   planned_crop: string;
+  display_name?: string | null;
+  owner_user_id?: string | null;
+  parent_parcel_id?: string | null;
+  area_m2?: number | null;
+  geometry?: [number, number][] | null;
+  centroid?: { lat: number; lng: number } | null;
+  split_strategy?: string | null;
+  subparcel_index?: number | null;
+  is_subparcel?: boolean;
 }
 
 export interface ParcelListResponse {
@@ -63,6 +72,8 @@ export interface FieldLayoutResponse {
 export interface NeighborItem {
   parcel_id: string;
   adjacency_type: "INTRA_BLOCK" | "INTER_BLOCK";
+  shared_boundary_ratio?: number;
+  shared_boundary_m?: number;
 }
 
 export interface NeighborsResponse {
@@ -93,6 +104,45 @@ export interface DecisionResponse {
   confidence: number | null;
   model_version: string;
   decision_source: DecisionSource;
+}
+
+export interface ParcelSubdivideRequest {
+  requested_count: number;
+  split_strategy?: string;
+}
+
+export interface ParcelSubdivideResponse {
+  parcel_id: string;
+  requested_count: number;
+  split_strategy: string;
+  subparcels: ParcelItem[];
+}
+
+export interface FieldSubdivideResponse {
+  field_block: "A" | "B";
+  requested_count: number;
+  split_strategy: string;
+  parcels: ParcelItem[];
+}
+
+export interface ParcelMutationResponse {
+  parcel_id: string;
+  parcels: ParcelItem[];
+}
+
+export interface ParcelNameUpdateRequest {
+  display_name: string;
+}
+
+export interface RiskSummaryResponse {
+  parcel_id: string;
+  season: string;
+  risk_score: number;
+  risk_level: RiskLevel;
+  area_weighted_score: number;
+  child_count: number;
+  dominant_crop: string;
+  subparcels: DecisionResponse[];
 }
 
 export type CropKey = "corn" | "sunflower" | "wheat" | "barley";

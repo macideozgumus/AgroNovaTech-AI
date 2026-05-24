@@ -26,6 +26,27 @@ def init_db() -> None:
             )
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS parcel_records (
+                parcel_id TEXT PRIMARY KEY,
+                village_id TEXT NOT NULL,
+                field_block TEXT NOT NULL,
+                planned_crop TEXT NOT NULL,
+                display_name TEXT NOT NULL DEFAULT '',
+                owner_user_id TEXT NOT NULL,
+                parent_parcel_id TEXT,
+                area_m2 REAL NOT NULL,
+                local_geometry TEXT NOT NULL,
+                is_active INTEGER NOT NULL DEFAULT 1,
+                split_strategy TEXT,
+                subparcel_index INTEGER
+            )
+            """
+        )
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(parcel_records)").fetchall()}
+        if "display_name" not in columns:
+            conn.execute("ALTER TABLE parcel_records ADD COLUMN display_name TEXT NOT NULL DEFAULT ''")
         conn.commit()
 
 

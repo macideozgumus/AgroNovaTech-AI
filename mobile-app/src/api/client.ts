@@ -1,9 +1,11 @@
-﻿import Constants from "expo-constants";
+import Constants from "expo-constants";
+import { Platform } from "react-native";
 
 import { loadAuthToken } from "./cache";
 import type {
   AIStatusResponse,
   DecisionResponse,
+  FieldSubdivideResponse,
   FieldLayoutPosition,
   FieldLayoutResponse,
   HarvestPlan,
@@ -12,8 +14,14 @@ import type {
   LoginRequest,
   LoginResponse,
   NeighborsResponse,
+  ParcelItem,
   ParcelListResponse,
+  ParcelMutationResponse,
+  ParcelNameUpdateRequest,
+  ParcelSubdivideRequest,
+  ParcelSubdivideResponse,
   RegisterRequest,
+  RiskSummaryResponse,
   ScenarioCreateRequest,
   ScenarioItem,
   ScenarioListResponse,
@@ -23,9 +31,27 @@ import type {
   UsersResponse,
 } from "../types/api";
 
+function resolveLanBaseUrlFromExpoHost(): string | undefined {
+  const hostUri =
+    Constants.expoConfig?.hostUri ||
+    Constants.expoGoConfig?.debuggerHost ||
+    Constants.manifest2?.extra?.expoClient?.hostUri;
+
+  if (!hostUri) {
+    return undefined;
+  }
+
+  const host = hostUri.split(":")[0]?.trim();
+  if (!host || host === "localhost" || host === "127.0.0.1") {
+    return undefined;
+  }
+
+  return `http://${host}:8000`;
+}
+
 const API_BASE_URL =
   (Constants.expoConfig?.extra?.apiBaseUrl as string | undefined) ||
-  "http://192.168.1.38:8000";
+  (Platform.OS === "web" ? "http://127.0.0.1:8000" : resolveLanBaseUrlFromExpoHost());
 const REQUEST_TIMEOUT_MS = 8000;
 const RETRY_COUNT = 2;
 
@@ -56,6 +82,12 @@ async function fetchWithTimeout(input: RequestInfo | URL, init?: RequestInit): P
 }
 
 async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
+  if (!API_BASE_URL) {
+    throw new ApiError(
+      "API base URL bulunamadi. `EXPO_PUBLIC_API_BASE_URL` tanimlayin veya Expo'yu `--lan` ile baslatin.",
+    );
+  }
+
   let attempt = 0;
 
   while (attempt <= RETRY_COUNT) {
@@ -78,6 +110,12 @@ async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
 
       return (await response.json()) as T;
     } catch (error) {
+      if (error instanceof TypeError) {
+        throw new ApiError(
+          `Ag baglantisi kurulamadi. API adresi: ${API_BASE_URL}. Telefon ile bilgisayar ayni agda degilse veya backend/ngrok kapaliysa bu hata gorulur.`,
+        );
+      }
+
       if (attempt === RETRY_COUNT) {
         throw error;
       }
@@ -143,6 +181,56 @@ export const apiClient = {
   getDecision(parcelId: string, season: string) {
     return requestJson<DecisionResponse>(
       `/api/v1/parcels/${parcelId}/decision?season=${encodeURIComponent(season)}`,
+    );
+  },
+
+  subdivideParcel(parcelId: string, payload: ParcelSubdivideRequest) {
+    return requestJson<ParcelSubdivideResponse>(`/api/v1/parcels/${parcelId}/subdivide`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+
+  subdivideField(fieldBlock: "A" | "B", payload: ParcelSubdivideRequest) {
+    return requestJson<FieldSubdivideResponse>(`/api/v1/fields/${fieldBlock}/subdivide`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+
+  getSubparcels(parcelId: string) {
+    return requestJson<ParcelListResponse>(`/api/v1/parcels/${parcelId}/subparcels`);
+  },
+
+  updateSubparcelCrop(parcelId: string, plannedCrop: string) {
+    return requestJson<ParcelItem>(`/api/v1/subparcels/${parcelId}/crop`, {
+      method: "PUT",
+      body: JSON.stringify({ planned_crop: plannedCrop }),
+    });
+  },
+
+  updateParcelName(parcelId: string, payload: ParcelNameUpdateRequest) {
+    return requestJson<ParcelItem>(`/api/v1/parcels/${parcelId}/name`, {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    });
+  },
+
+  undoParcelSplit(parcelId: string) {
+    return requestJson<ParcelMutationResponse>(`/api/v1/parcels/${parcelId}/undo`, {
+      method: "POST",
+    });
+  },
+
+  deleteParcel(parcelId: string) {
+    return requestJson<ParcelMutationResponse>(`/api/v1/parcels/${parcelId}`, {
+      method: "DELETE",
+    });
+  },
+
+  getParcelRiskSummary(parcelId: string, season: string) {
+    return requestJson<RiskSummaryResponse>(
+      `/api/v1/parcels/${parcelId}/risk-summary?season=${encodeURIComponent(season)}`,
     );
   },
 

@@ -13,7 +13,7 @@ from backend.app.services.optimizer_service import (
     generate_yield_risk_plan,
     score_plan,
 )
-from backend.app.services.village_service import PARCELS, ensure_village
+from backend.app.services.village_service import ensure_village, get_all_parcel_ids
 
 
 class ScenarioParcelInput(TypedDict):
@@ -50,11 +50,12 @@ def recommend_scenarios(village_id: str) -> list[ResearchPlan]:
 def _validate_parcels(items: list[ScenarioParcelInput]) -> dict[str, CropKey]:
     if not items:
         raise HTTPException(status_code=400, detail="Scenario parcels are required")
+    valid_parcels = set(get_all_parcel_ids())
     selections: dict[str, CropKey] = {}
     for item in items:
         parcel_id = item["parcel_id"]
         crop = item["crop"]
-        if parcel_id not in PARCELS:
+        if parcel_id not in valid_parcels:
             raise HTTPException(status_code=404, detail=f"Parcel not found: {parcel_id}")
         selections[parcel_id] = crop
     return selections

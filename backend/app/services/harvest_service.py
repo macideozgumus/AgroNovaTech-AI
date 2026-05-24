@@ -5,7 +5,7 @@ from typing import Literal, TypedDict
 
 from fastapi import HTTPException
 
-from backend.app.services.village_service import PARCELS
+from backend.app.services.village_service import get_all_parcel_ids
 
 HarvestStatus = Literal["planned", "active", "done"]
 
@@ -68,7 +68,7 @@ def delete_harvest_plan(plan_id: str) -> None:
 def _validate_harvest_payload(title: str, parcel_id: str, planned_date: str, status: HarvestStatus) -> None:
     if len(title.strip()) < 3:
         raise HTTPException(status_code=400, detail="Harvest title must be at least 3 characters")
-    if parcel_id not in PARCELS:
+    if parcel_id not in set(get_all_parcel_ids()):
         raise HTTPException(status_code=404, detail="Parcel not found")
     if len(planned_date.strip()) < 8:
         raise HTTPException(status_code=400, detail="Planned date is required")

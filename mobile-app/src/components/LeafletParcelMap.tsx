@@ -33,24 +33,6 @@ type ParcelFeature = {
 };
 
 const center: [number, number] = [37.8422, 40.1178];
-const villageBoundaryCoordinates: [number, number][] = [
-  [center[0] + 0.0019, center[1] - 0.00225],
-  [center[0] + 0.0019, center[1] + 0.00225],
-  [center[0] - 0.00305, center[1] + 0.00225],
-  [center[0] - 0.00305, center[1] - 0.00225],
-];
-const villageMinePolygon: [number, number][] = [
-  [center[0] + 0.00135, center[1] - 0.0018],
-  [center[0] + 0.00135, center[1] - 0.0002],
-  [center[0] - 0.00245, center[1] - 0.0002],
-  [center[0] - 0.00245, center[1] - 0.0018],
-];
-const villageNeighborPolygon: [number, number][] = [
-  [center[0] + 0.00135, center[1] + 0.0002],
-  [center[0] + 0.00135, center[1] + 0.0018],
-  [center[0] - 0.00245, center[1] + 0.0018],
-  [center[0] - 0.00245, center[1] + 0.0002],
-];
 
 const parcelOffsets = [
   { lat: 0.0011, lng: -0.0014 },
@@ -74,6 +56,35 @@ function buildParcelPolygon(baseLat: number, baseLng: number): [number, number][
   ];
 }
 
+function getFeatureCoordinates(item: ParcelMapItem, index: number): [number, number][] {
+  if (item.parcel.geometry && item.parcel.geometry.length >= 3) {
+    return item.parcel.geometry as [number, number][];
+  }
+  const offset = parcelOffsets[index % parcelOffsets.length];
+  return buildParcelPolygon(center[0] + offset.lat, center[1] + offset.lng);
+}
+
+function buildVillageBoundary(features: ParcelFeature[]): [number, number][] | null {
+  if (features.length === 0) {
+    return null;
+  }
+  const points = features.flatMap((feature) => feature.coordinates);
+  const latitudes = points.map((point) => point[0]);
+  const longitudes = points.map((point) => point[1]);
+  const minLat = Math.min(...latitudes);
+  const maxLat = Math.max(...latitudes);
+  const minLng = Math.min(...longitudes);
+  const maxLng = Math.max(...longitudes);
+  const latPad = Math.max((maxLat - minLat) * 0.12, 0.00018);
+  const lngPad = Math.max((maxLng - minLng) * 0.12, 0.00018);
+  return [
+    [maxLat + latPad, minLng - lngPad],
+    [maxLat + latPad, maxLng + lngPad],
+    [minLat - latPad, maxLng + lngPad],
+    [minLat - latPad, minLng - lngPad],
+  ];
+}
+
 function buildHtml(
   features: ParcelFeature[],
   selectedParcelId?: string | null,
@@ -83,6 +94,7 @@ function buildHtml(
 ) {
   const payload = JSON.stringify(features);
   const safeSelected = selectedParcelId ?? "";
+  const boundary = buildVillageBoundary(features);
 
   return `<!DOCTYPE html>
   <html>
@@ -99,7 +111,12 @@ function buildHtml(
           border-radius: 999px;
           color: #233127;
           font-weight: 700;
-          padding: 4px 10px;
+          font-size: 12px;
+          padding: 3px 8px;
+          max-width: 112px;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
           box-shadow: 0 6px 16px rgba(0,0,0,0.12);
         }
         .parcel-icon {
@@ -129,8 +146,8 @@ function buildHtml(
 
         const group = L.featureGroup();
 
-        if (showVillageBoundary) {
-          const villagePolygon = L.polygon(${JSON.stringify(villageBoundaryCoordinates)}, {
+        if (showVillageBoundary && ${JSON.stringify(boundary)} !== null) {
+          const villagePolygon = L.polygon(${JSON.stringify(boundary)}, {
             color: "#2B7FFF",
             weight: 3,
             fillOpacity: 0.02,
@@ -203,42 +220,11 @@ export function LeafletParcelMap({
   preferredFit = "all",
 }: Props) {
   const features = useMemo<ParcelFeature[]>(() => {
-    if (showVillageBoundary) {
-      const mineItems = items.filter((item) => item.isMine);
-      const neighborItems = items.filter((item) => !item.isMine);
-      const groups = [
-        { name: "Benim Tarlam", mine: true, coordinates: villageMinePolygon, sourceItems: mineItems },
-        { name: "Diğer Parseller", mine: false, coordinates: villageNeighborPolygon, sourceItems: neighborItems },
-      ] as const;
-
-      return groups
-        .filter((group) => group.sourceItems.length > 0)
-        .map((group) => {
-          const leadItem = group.sourceItems[0];
-          const tone = riskTone(leadItem.riskLevel);
-          return {
-            id: group.mine ? "__group_mine__" : "__group_neighbor__",
-            name: group.name,
-            riskText: tone.text,
-            color: tone.fieldFill,
-            borderColor: tone.fieldBorder,
-            mine: group.mine,
-            cropKey: leadItem.cropKey,
-            cropIcon:
-              Platform.OS === "web"
-                ? ""
-                : getCropIconUri(leadItem.cropKey, leadItem.riskLevel === "CRITICAL" ? "wilted" : "normal"),
-            coordinates: group.coordinates,
-          };
-        });
-    }
-
-    return items.slice(0, parcelOffsets.length).map((item, index) => {
+    return items.map((item, index) => {
       const tone = riskTone(item.riskLevel);
-      const offset = parcelOffsets[index];
       return {
         id: item.parcel.parcel_id,
-        name: getFriendlyParcelName(item.parcel.parcel_id),
+        name: getFriendlyParcelName(item.parcel.parcel_id, item.parcel.display_name),
         riskText: tone.text,
         color: tone.fieldFill,
         borderColor: tone.fieldBorder,
@@ -248,7 +234,7 @@ export function LeafletParcelMap({
           Platform.OS === "web"
             ? ""
             : getCropIconUri(item.cropKey, item.riskLevel === "CRITICAL" ? "wilted" : "normal"),
-        coordinates: buildParcelPolygon(center[0] + offset.lat, center[1] + offset.lng),
+        coordinates: getFeatureCoordinates(item, index),
       };
     });
   }, [items, showVillageBoundary]);

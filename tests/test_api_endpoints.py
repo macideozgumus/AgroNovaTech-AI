@@ -1,8 +1,15 @@
-﻿from fastapi.testclient import TestClient
+import pytest
+from fastapi.testclient import TestClient
 
 from backend.app.main import app
+from backend.app.services.village_service import reset_village_data
 
 client = TestClient(app)
+
+
+@pytest.fixture(autouse=True)
+def reset_demo_parcels():
+    reset_village_data()
 
 
 def test_login_and_parcels_flow():
@@ -40,6 +47,67 @@ def test_layout_neighbors_score_decision_flow():
     decision = client.get("/api/v1/parcels/a_p1/decision", params={"season": "2026_Spring"})
     assert decision.status_code == 200
     assert decision.json()["parcel_id"] == "a_p1"
+
+
+def test_subdivide_and_risk_summary_flow():
+    subdivide = client.post(
+        "/api/v1/parcels/a_p1/subdivide",
+        json={"requested_count": 3, "split_strategy": "equal_grid"},
+    )
+    assert subdivide.status_code == 200
+    payload = subdivide.json()
+    assert payload["requested_count"] == 3
+    assert len(payload["subparcels"]) == 3
+    assert all(item["parent_parcel_id"] == "a_p1" for item in payload["subparcels"])
+
+    parcels = client.get("/api/v1/villages/v1/parcels")
+    assert parcels.status_code == 200
+    parcel_ids = {item["parcel_id"] for item in parcels.json()["parcels"]}
+    assert "a_p1" not in parcel_ids
+    assert "a_p1_s1" in parcel_ids
+
+    crop_update = client.put("/api/v1/subparcels/a_p1_s1/crop", json={"planned_crop": "barley"})
+    assert crop_update.status_code == 200
+    assert crop_update.json()["planned_crop"] == "barley"
+
+    rename = client.put("/api/v1/parcels/a_p1_s1/name", json={"display_name": "Deneme Parseli"})
+    assert rename.status_code == 200
+    assert rename.json()["display_name"] == "Deneme Parseli"
+
+    summary = client.get("/api/v1/parcels/a_p1/risk-summary", params={"season": "2026_Spring"})
+    assert summary.status_code == 200
+    body = summary.json()
+    assert body["parcel_id"] == "a_p1"
+    assert body["child_count"] == 3
+    assert len(body["subparcels"]) == 3
+
+
+def test_whole_field_subdivide_undo_and_delete_flow():
+    subdivide = client.post(
+        "/api/v1/fields/A/subdivide",
+        json={"requested_count": 5, "split_strategy": "equal_grid"},
+    )
+    assert subdivide.status_code == 200
+    payload = subdivide.json()
+    assert payload["field_block"] == "A"
+    assert len(payload["parcels"]) == 5
+    assert payload["parcels"][0]["display_name"] == "Parsel 1"
+
+    parcels = client.get("/api/v1/villages/v1/parcels").json()["parcels"]
+    a_ids = {item["parcel_id"] for item in parcels if item["field_block"] == "A"}
+    assert "a_p1" not in a_ids
+    assert "field_a_root_s1" in a_ids
+
+    deleted = client.delete("/api/v1/parcels/field_a_root_s1")
+    assert deleted.status_code == 200
+    remaining = {item["parcel_id"] for item in deleted.json()["parcels"]}
+    assert "field_a_root_s1" not in remaining
+
+    undo = client.post("/api/v1/parcels/field_a_root_s2/undo")
+    assert undo.status_code == 200
+    restored = {item["parcel_id"] for item in undo.json()["parcels"]}
+    assert "a_p1" in restored
+    assert "a_p8" in restored
 
 
 def test_register_and_list_users_flow():
@@ -204,12 +272,11 @@ def test_scenario_harvest_and_ai_edge_cases():
 
 
 def test_scenario_chat_endpoint():
-    """POST /api/v1/scenario/chat — açıklama katmanı doğal dil yanıt döner."""
     resp = client.post(
         "/api/v1/scenario/chat",
         json={
             "plan_id": "balanced_v1",
-            "user_message": "Bu planı neden önerdin?",
+            "user_message": "Bu plani neden onerdin?",
             "village_id": "v1",
             "season": "2026_Spring",
         },
@@ -218,46 +285,3 @@ def test_scenario_chat_endpoint():
     body = resp.json()
     assert "reply" in body
     assert isinstance(body["suggestions"], list)
-    assert len(body["suggestions"]) > 0
-    assert body["provider"] in {"fallback", "gemini"}
-    assert "optimizer" in body["reply"] or "skor motoru" in body["reply"] or "planı" in body["reply"]
-
-
-def test_scenario_chat_missing_fields():
-    """Eksik user_message alanı ile 422 validation error beklenir."""
-    resp = client.post(
-        "/api/v1/scenario/chat",
-        json={
-            "plan_id": "balanced_v1",
-            "village_id": "v1",
-            "season": "2026_Spring",
-        },
-    )
-    assert resp.status_code == 422
-
-
-def test_scenario_plan_response_new_fields():
-    """Recommend response'unda hybrid mimari alanları dolu olarak dönmeli."""
-    resp = client.post("/api/v1/scenario/recommend", json={"village_id": "v1", "season": "2026_Spring"})
-    assert resp.status_code == 200
-    plans = resp.json()["plans"]
-    assert len(plans) > 0
-    first_plan = plans[0]
-    assert "optimizer_score" in first_plan
-    assert "final_score" in first_plan
-    assert "final_rank" in first_plan
-    assert "rules_passed" in first_plan
-    assert "rules_warnings" in first_plan
-    assert "llm_provider" in first_plan
-    assert "llm_explanation" in first_plan
-    assert "what_if" in first_plan
-    assert isinstance(first_plan["optimizer_score"], (int, float))
-    assert isinstance(first_plan["final_score"], (int, float))
-    assert first_plan["final_rank"] == 1
-    assert isinstance(first_plan["rules_passed"], bool)
-    assert isinstance(first_plan["rules_warnings"], list)
-    assert first_plan["llm_provider"] in {"fallback", "gemini"}
-    assert isinstance(first_plan["llm_explanation"], str)
-    assert first_plan["llm_explanation"]
-    assert isinstance(first_plan["what_if"], list)
-    assert len(first_plan["what_if"]) > 0

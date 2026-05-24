@@ -64,20 +64,30 @@ const cropImageSources: Record<CropKey, { normal: ImageSourcePropType; wilted: I
   },
 };
 
-export function getFriendlyParcelName(parcelId: string) {
+export function getFriendlyParcelName(parcelId: string, displayName?: string | null) {
+  if (displayName && displayName.trim().length > 0) {
+    return displayName.trim();
+  }
   const match = parcelId.match(/([ab])_p(\d+)/i);
   if (!match) {
-    return parcelId.toUpperCase();
+    const splitMatch = parcelId.match(/_s(\d+)$/i);
+    if (splitMatch) {
+      return `Parsel ${Number(splitMatch[1])}`;
+    }
+    return parcelId.replace(/_/g, " ").toUpperCase();
   }
 
   const order = Number(match[2]);
   return `${order}. Parsel`;
 }
 
-export function getFriendlyParcelSubtitle(parcelId: string) {
+export function getFriendlyParcelSubtitle(parcelId: string, displayName?: string | null) {
   const match = parcelId.match(/([ab])_p(\d+)/i);
   if (!match) {
-    return parcelId.toUpperCase();
+    if (displayName && displayName.trim().length > 0) {
+      return "Kullanici parcasi";
+    }
+    return parcelId.replace(/_/g, " ").toUpperCase();
   }
 
   return `${match[1].toUpperCase()} Blok`;
